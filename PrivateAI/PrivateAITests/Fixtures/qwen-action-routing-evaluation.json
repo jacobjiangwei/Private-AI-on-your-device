@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "model": "qwen3.8:27b-mlx",
+  "tasks": [
+    {
+      "id": "nearby-restaurants-zh-reported",
+      "prompt": "我附近的餐馆有什么推荐吗",
+      "expectedAction": "local_search",
+      "expectedValues": ["query"]
+    },
+    {
+      "id": "nearby-food-zh-paraphrase",
+      "prompt": "周围哪儿能吃顿便饭？",
+      "expectedAction": "local_search",
+      "expectedValues": ["query"]
+    },
+    {
+      "id": "nearby-coffee-en-paraphrase",
+      "prompt": "Can you find a quiet coffee shop close to me?",
+      "expectedAction": "local_search",
+      "expectedValues": ["query"]
+    },
+    {
+      "id": "current-location-zh",
+      "prompt": "我现在在哪个城市？",
+      "expectedAction": "local_context",
+      "expectedValues": ["location"]
+    },
+    {
+      "id": "weather-at-current-location-en",
+      "prompt": "What is the weather where I am right now?",
+      "expectedAction": "local_context",
+      "expectedValues": ["location"]
+    },
+    {
+      "id": "current-release-web-en",
+      "prompt": "Check current sources and tell me the latest stable Swift release.",
+      "expectedAction": "web_search",
+      "expectedValues": ["query"]
+    },
+    {
+      "id": "explicit-url-en",
+      "prompt": "Summarize https://example.com/article",
+      "expectedAction": "fetch_url",
+      "expectedValues": ["https://example.com/article"]
+    },
+    {
+      "id": "deterministic-calculation-en",
+      "prompt": "Calculate (37 * 19) - 44 exactly.",
+      "expectedAction": "code_interpreter",
+      "expectedValues": ["expression"]
+    },
+    {
+      "id": "direct-rewrite-en",
+      "prompt": "Rewrite this sentence to sound warmer: The meeting is Tuesday.",
+      "expectedAction": "direct",
+      "expectedValues": []
+    },
+    {
+      "id": "direct-translation-nearby-en",
+      "prompt": "Translate 'Find restaurants near me' into Chinese. Do not perform the search.",
+      "expectedAction": "direct",
+      "expectedValues": []
+    },
+    {
+      "id": "direct-location-negation-en",
+      "prompt": "Do not access my location. Explain what a nearby search means.",
+      "expectedAction": "direct",
+      "expectedValues": []
+    },
+    {
+      "id": "direct-location-document-zh",
+      "prompt": "解释文档里这句话的意思：‘我附近有什么餐馆？’不要定位我。",
+      "expectedAction": "direct",
+      "expectedValues": []
+    }
+  ]
+}

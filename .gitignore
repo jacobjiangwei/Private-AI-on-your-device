@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode / Swift
+DerivedData/
+.build/
+build/
+*.xcarchive
+*.xcuserstate
+xcuserdata/
+
+# Node.js
+WebBuild/node_modules/
+npm-debug.log*
+
+# Local configuration and logs
+.env
+.env.*
+!.env.example
+*.log
+*.profraw
+*.profdata
+
+# Signing and provisioning material
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# Direct-release artifacts
+*.dmg
+*.dmg.sha256

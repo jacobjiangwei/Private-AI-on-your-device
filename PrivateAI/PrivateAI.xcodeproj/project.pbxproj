@@ -1,0 +1,603 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		16ACA635303EF40B0007E6F9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 16ACA61D303EF40A0007E6F9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 16ACA624303EF40A0007E6F9;
+			remoteInfo = PrivateAI;
+		};
+		16ACA63F303EF40B0007E6F9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 16ACA61D303EF40A0007E6F9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 16ACA624303EF40A0007E6F9;
+			remoteInfo = PrivateAI;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		16ACA625303EF40A0007E6F9 /* PrivateAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrivateAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		16ACA634303EF40B0007E6F9 /* PrivateAITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrivateAITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		16ACA63E303EF40B0007E6F9 /* PrivateAIUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrivateAIUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		16ACA627303EF40A0007E6F9 /* PrivateAI */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PrivateAI;
+			sourceTree = "<group>";
+		};
+		16ACA637303EF40B0007E6F9 /* PrivateAITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PrivateAITests;
+			sourceTree = "<group>";
+		};
+		16ACA641303EF40B0007E6F9 /* PrivateAIUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PrivateAIUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		16ACA622303EF40A0007E6F9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16ACA631303EF40B0007E6F9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16ACA63B303EF40B0007E6F9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		16ACA61C303EF40A0007E6F9 = {
+			isa = PBXGroup;
+			children = (
+				16ACA627303EF40A0007E6F9 /* PrivateAI */,
+				16ACA637303EF40B0007E6F9 /* PrivateAITests */,
+				16ACA641303EF40B0007E6F9 /* PrivateAIUITests */,
+				16ACA626303EF40A0007E6F9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		16ACA626303EF40A0007E6F9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				16ACA625303EF40A0007E6F9 /* PrivateAI.app */,
+				16ACA634303EF40B0007E6F9 /* PrivateAITests.xctest */,
+				16ACA63E303EF40B0007E6F9 /* PrivateAIUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		16ACA624303EF40A0007E6F9 /* PrivateAI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 16ACA648303EF40B0007E6F9 /* Build configuration list for PBXNativeTarget "PrivateAI" */;
+			buildPhases = (
+				16ACA621303EF40A0007E6F9 /* Sources */,
+				16ACA622303EF40A0007E6F9 /* Frameworks */,
+				16ACA623303EF40A0007E6F9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				16ACA627303EF40A0007E6F9 /* PrivateAI */,
+			);
+			name = PrivateAI;
+			packageProductDependencies = (
+			);
+			productName = PrivateAI;
+			productReference = 16ACA625303EF40A0007E6F9 /* PrivateAI.app */;
+			productType = "com.apple.product-type.application";
+		};
+		16ACA633303EF40B0007E6F9 /* PrivateAITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 16ACA64B303EF40B0007E6F9 /* Build configuration list for PBXNativeTarget "PrivateAITests" */;
+			buildPhases = (
+				16ACA630303EF40B0007E6F9 /* Sources */,
+				16ACA631303EF40B0007E6F9 /* Frameworks */,
+				16ACA632303EF40B0007E6F9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				16ACA636303EF40B0007E6F9 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				16ACA637303EF40B0007E6F9 /* PrivateAITests */,
+			);
+			name = PrivateAITests;
+			packageProductDependencies = (
+			);
+			productName = PrivateAITests;
+			productReference = 16ACA634303EF40B0007E6F9 /* PrivateAITests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		16ACA63D303EF40B0007E6F9 /* PrivateAIUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 16ACA64E303EF40B0007E6F9 /* Build configuration list for PBXNativeTarget "PrivateAIUITests" */;
+			buildPhases = (
+				16ACA63A303EF40B0007E6F9 /* Sources */,
+				16ACA63B303EF40B0007E6F9 /* Frameworks */,
+				16ACA63C303EF40B0007E6F9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				16ACA640303EF40B0007E6F9 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				16ACA641303EF40B0007E6F9 /* PrivateAIUITests */,
+			);
+			name = PrivateAIUITests;
+			packageProductDependencies = (
+			);
+			productName = PrivateAIUITests;
+			productReference = 16ACA63E303EF40B0007E6F9 /* PrivateAIUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		16ACA61D303EF40A0007E6F9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					16ACA624303EF40A0007E6F9 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					16ACA633303EF40B0007E6F9 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 16ACA624303EF40A0007E6F9;
+					};
+					16ACA63D303EF40B0007E6F9 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 16ACA624303EF40A0007E6F9;
+					};
+				};
+			};
+			buildConfigurationList = 16ACA620303EF40A0007E6F9 /* Build configuration list for PBXProject "PrivateAI" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				"zh-Hans",
+				Base,
+			);
+			mainGroup = 16ACA61C303EF40A0007E6F9;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 16ACA626303EF40A0007E6F9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				16ACA624303EF40A0007E6F9 /* PrivateAI */,
+				16ACA633303EF40B0007E6F9 /* PrivateAITests */,
+				16ACA63D303EF40B0007E6F9 /* PrivateAIUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		16ACA623303EF40A0007E6F9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16ACA632303EF40B0007E6F9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16ACA63C303EF40B0007E6F9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		16ACA621303EF40A0007E6F9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16ACA630303EF40B0007E6F9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16ACA63A303EF40B0007E6F9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		16ACA636303EF40B0007E6F9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 16ACA624303EF40A0007E6F9 /* PrivateAI */;
+			targetProxy = 16ACA635303EF40B0007E6F9 /* PBXContainerItemProxy */;
+		};
+		16ACA640303EF40B0007E6F9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 16ACA624303EF40A0007E6F9 /* PrivateAI */;
+			targetProxy = 16ACA63F303EF40B0007E6F9 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		16ACA646303EF40B0007E6F9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = WA29CC2SZR;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG APP_STORE $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		16ACA647303EF40B0007E6F9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = WA29CC2SZR;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		16ACA649303EF40B0007E6F9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PrivateAI/PrivateAI.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = PT67MP6H24;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PrivateAI;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PrivateAI connects to the Ollama service running on your Mac.";
+				INFOPLIST_KEY_NSLocationUsageDescription = "PrivateAI uses your location only when you ask for nearby places or other location-aware information.";
+				INFOPLIST_KEY_PrivateAIPrivacyPolicyURL = "$(PRIVATEAI_PRIVACY_POLICY_URL)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRIVATEAI_PRIVACY_POLICY_URL = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacobjiangwei.privateai;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = NO;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG APP_STORE $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		16ACA64A303EF40B0007E6F9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PrivateAI/PrivateAI.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = PT67MP6H24;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PrivateAI;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PrivateAI connects to the Ollama service running on your Mac.";
+				INFOPLIST_KEY_NSLocationUsageDescription = "PrivateAI uses your location only when you ask for nearby places or other location-aware information.";
+				INFOPLIST_KEY_PrivateAIPrivacyPolicyURL = "$(PRIVATEAI_PRIVACY_POLICY_URL)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRIVATEAI_PRIVACY_POLICY_URL = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacobjiangwei.privateai;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = NO;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "APP_STORE APP_STORE_RELEASE $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		16ACA64C303EF40B0007E6F9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WA29CC2SZR;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacobjiangwei.privateai.PrivateAITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PrivateAI.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PrivateAI";
+			};
+			name = Debug;
+		};
+		16ACA64D303EF40B0007E6F9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WA29CC2SZR;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacobjiangwei.privateai.PrivateAITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PrivateAI.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PrivateAI";
+			};
+			name = Release;
+		};
+		16ACA64F303EF40B0007E6F9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WA29CC2SZR;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacobjiangwei.privateai.PrivateAIUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_TARGET_NAME = PrivateAI;
+			};
+			name = Debug;
+		};
+		16ACA650303EF40B0007E6F9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WA29CC2SZR;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacobjiangwei.privateai.PrivateAIUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_TARGET_NAME = PrivateAI;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		16ACA620303EF40A0007E6F9 /* Build configuration list for PBXProject "PrivateAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				16ACA646303EF40B0007E6F9 /* Debug */,
+				16ACA647303EF40B0007E6F9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		16ACA648303EF40B0007E6F9 /* Build configuration list for PBXNativeTarget "PrivateAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				16ACA649303EF40B0007E6F9 /* Debug */,
+				16ACA64A303EF40B0007E6F9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		16ACA64B303EF40B0007E6F9 /* Build configuration list for PBXNativeTarget "PrivateAITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				16ACA64C303EF40B0007E6F9 /* Debug */,
+				16ACA64D303EF40B0007E6F9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		16ACA64E303EF40B0007E6F9 /* Build configuration list for PBXNativeTarget "PrivateAIUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				16ACA64F303EF40B0007E6F9 /* Debug */,
+				16ACA650303EF40B0007E6F9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 16ACA61D303EF40A0007E6F9 /* Project object */;
+}

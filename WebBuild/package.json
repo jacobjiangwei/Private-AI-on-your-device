@@ -1,0 +1,19 @@
+{
+  "name": "local-chat-transcript",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/vendor.js --bundle --minify --format=iife --platform=browser --outfile=../PrivateAI/PrivateAI/Web/vendor.js",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "dompurify": "3.2.6",
+    "highlight.js": "11.11.1",
+    "katex": "0.16.22",
+    "markdown-it": "14.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  }
+}
