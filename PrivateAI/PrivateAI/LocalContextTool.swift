@@ -589,7 +589,7 @@ private final class LocationCancellationRegistry: @unchecked Sendable {
 }
 
 @MainActor
-final class LocationResolver: NSObject, @MainActor CLLocationManagerDelegate {
+final class LocationResolver: NSObject, @preconcurrency CLLocationManagerDelegate {
     static let shared = LocationResolver()
 
     private enum Phase {
