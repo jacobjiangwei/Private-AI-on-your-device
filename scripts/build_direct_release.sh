@@ -11,6 +11,17 @@ DMG_PATH="$OUTPUT_DIRECTORY/PrivateAI.dmg"
 STAGING_DIRECTORY="$OUTPUT_DIRECTORY/dmg-root"
 BUNDLE_ID="${PRODUCT_BUNDLE_IDENTIFIER:-com.jacobjiangwei.privateai}"
 PRIVACY_POLICY_URL="${PRIVATEAI_PRIVACY_POLICY_URL:-}"
+BUILD_NUMBER="${PRIVATEAI_BUILD_NUMBER:-}"
+
+if [[ -n "$BUILD_NUMBER" && ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+  echo "PRIVATEAI_BUILD_NUMBER must contain only decimal digits." >&2
+  exit 1
+fi
+
+build_number_setting=()
+if [[ -n "$BUILD_NUMBER" ]]; then
+  build_number_setting+=(CURRENT_PROJECT_VERSION="$BUILD_NUMBER")
+fi
 
 required=(APPLE_TEAM_ID NOTARY_KEY_ID NOTARY_ISSUER_ID NOTARY_KEY_PATH)
 missing=()
@@ -41,7 +52,8 @@ xcodebuild archive \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
   PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
   PRIVATEAI_PRIVACY_POLICY_URL="$PRIVACY_POLICY_URL" \
-  OTHER_CODE_SIGN_FLAGS='--timestamp --options runtime'
+  OTHER_CODE_SIGN_FLAGS='--timestamp --options runtime' \
+  "${build_number_setting[@]}"
 
 [[ -d "$APP_PATH" ]] || {
   echo "Archive did not contain PrivateAI.app." >&2
@@ -82,6 +94,9 @@ xcrun notarytool submit "$DMG_PATH" \
 xcrun stapler staple "$DMG_PATH"
 xcrun stapler validate "$DMG_PATH"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG_PATH"
-shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+(
+  cd "$OUTPUT_DIRECTORY"
+  shasum -a 256 "$(basename "$DMG_PATH")" > "$(basename "$DMG_PATH").sha256"
+)
 
 printf 'Created notarized release:\n%s\n%s\n' "$DMG_PATH" "$DMG_PATH.sha256"

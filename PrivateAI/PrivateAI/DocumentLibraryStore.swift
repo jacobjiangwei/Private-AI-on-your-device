@@ -382,7 +382,7 @@ public actor DocumentLibraryStore {
     }
 
     public func deleteDocument(id: UUID) throws {
-        if let record = try document(id: id) {
+        if try document(id: id) != nil {
             try transaction {
                 try execute(
                     "DELETE FROM documents WHERE id = ?",

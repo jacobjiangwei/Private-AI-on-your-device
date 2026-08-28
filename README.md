@@ -39,7 +39,7 @@ Use the shared `PrivateAI-Tests` scheme in Xcode. Live Ollama evaluations and pe
 
 ## Releases
 
-Pushing a `v*` tag runs the GitHub Actions release workflow. It imports a Developer ID certificate from encrypted repository secrets, archives the app, signs and notarizes a DMG, staples the Apple ticket, validates it with Gatekeeper, and publishes the DMG plus its SHA-256 checksum. See [the release setup guide](docs/direct-release.md).
+Every push to `main` runs the signed GitHub Actions build, assigns the GitHub workflow run number as the app build number, and publishes a public GitHub Release such as `v1.0-build.42`. The workflow imports a Developer ID certificate from the protected `production` environment, archives the app, signs and notarizes a DMG, staples the Apple ticket, validates it with Gatekeeper, and publishes the DMG plus its SHA-256 checksum. See [the release setup guide](docs/direct-release.md).
 
 ## Privacy
 

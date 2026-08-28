@@ -576,7 +576,7 @@ private final class LocationCancellationRegistry: @unchecked Sendable {
     private var cancelledRequestIDs: Set<UUID> = []
 
     func markCancelled(_ requestID: UUID) {
-        lock.withLock { cancelledRequestIDs.insert(requestID) }
+        lock.withLock { _ = cancelledRequestIDs.insert(requestID) }
     }
 
     func consumeCancellation(_ requestID: UUID) -> Bool {
@@ -584,7 +584,7 @@ private final class LocationCancellationRegistry: @unchecked Sendable {
     }
 
     func clear(_ requestID: UUID) {
-        lock.withLock { cancelledRequestIDs.remove(requestID) }
+        lock.withLock { _ = cancelledRequestIDs.remove(requestID) }
     }
 }
 

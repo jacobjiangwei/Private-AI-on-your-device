@@ -1,0 +1,180 @@
+name: Signed macOS build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-notarize:
+    name: Build, sign, and notarize
+    runs-on: macos-15
+    timeout-minutes: 60
+    environment:
+      name: production
+    outputs:
+      marketing_version: ${{ steps.release-metadata.outputs.marketing_version }}
+      build_number: ${{ steps.release-metadata.outputs.build_number }}
+    env:
+      APPLE_TEAM_ID: ${{ vars['APPLE_TEAM_ID'] }}
+      DEVELOPER_ID_P12_BASE64: ${{ secrets['DEVELOPER_ID_P12_BASE64'] }}
+      DEVELOPER_ID_P12_PASSWORD: ${{ secrets['DEVELOPER_ID_P12_PASSWORD'] }}
+      KEYCHAIN_PASSWORD: ${{ secrets['KEYCHAIN_PASSWORD'] }}
+      NOTARY_KEY_P8_BASE64: ${{ secrets['NOTARY_KEY_P8_BASE64'] }}
+      NOTARY_KEY_ID: ${{ vars['NOTARY_KEY_ID'] }}
+      NOTARY_ISSUER_ID: ${{ vars['NOTARY_ISSUER_ID'] }}
+      PRODUCT_BUNDLE_IDENTIFIER: ${{ vars['PRODUCT_BUNDLE_IDENTIFIER'] }}
+      PRIVATEAI_PRIVACY_POLICY_URL: ${{ vars['PRIVATEAI_PRIVACY_POLICY_URL'] }}
+      PRIVATEAI_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate signing configuration
+        shell: bash
+        run: |
+          missing=()
+          for name in \
+            APPLE_TEAM_ID \
+            DEVELOPER_ID_P12_BASE64 \
+            DEVELOPER_ID_P12_PASSWORD \
+            KEYCHAIN_PASSWORD \
+            NOTARY_KEY_P8_BASE64 \
+            NOTARY_KEY_ID \
+            NOTARY_ISSUER_ID; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required GitHub Actions secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Import Developer ID certificate
+        shell: bash
+        run: |
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/privateai-signing.keychain-db"
+          notary_key_path="$RUNNER_TEMP/notary-api-key.p8"
+          {
+            echo "CERTIFICATE_PATH=$certificate_path"
+            echo "KEYCHAIN_PATH=$keychain_path"
+            echo "NOTARY_KEY_PATH=$notary_key_path"
+          } >> "$GITHUB_ENV"
+
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Install notarization API key
+        shell: bash
+        run: |
+          printf '%s' "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
+          chmod 600 "$NOTARY_KEY_PATH"
+
+      - name: Build distributable DMG
+        run: ./scripts/build_direct_release.sh
+
+      - name: Read release metadata
+        id: release-metadata
+        shell: bash
+        run: |
+          app_path="build/direct/PrivateAI.xcarchive/Products/Applications/PrivateAI.app"
+          marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
+          build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_path/Contents/Info.plist")"
+
+          [[ "$build_number" == "$PRIVATEAI_BUILD_NUMBER" ]] || {
+            echo "Expected build number $PRIVATEAI_BUILD_NUMBER, found $build_number." >&2
+            exit 1
+          }
+
+          echo "marketing_version=$marketing_version" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: PrivateAI-${{ github.sha }}
+          path: |
+            build/direct/PrivateAI.dmg
+            build/direct/PrivateAI.dmg.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+          rm -f "$CERTIFICATE_PATH" "$NOTARY_KEY_PATH"
+
+  publish-release:
+    name: Publish public release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-and-notarize
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: PrivateAI-${{ github.sha }}
+          path: release
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MARKETING_VERSION: ${{ needs.build-and-notarize.outputs.marketing_version }}
+          BUILD_NUMBER: ${{ needs.build-and-notarize.outputs.build_number }}
+        run: |
+          latest_main_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if [[ "$latest_main_sha" != "$GITHUB_SHA" ]]; then
+            echo "A newer main build exists; skipping the stale release for $GITHUB_SHA."
+            exit 0
+          fi
+
+          release_tag="v${MARKETING_VERSION}-build.${BUILD_NUMBER}"
+          short_sha="${GITHUB_SHA:0:7}"
+          published_at="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          release_title="PrivateAI ${MARKETING_VERSION} (${BUILD_NUMBER})"
+          release_notes="Signed and notarized build ${BUILD_NUMBER} from main at ${short_sha}, published ${published_at}."
+
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$release_tag" \
+              --title "$release_title" \
+              --notes "$release_notes" \
+              --repo "$GITHUB_REPOSITORY"
+            gh release upload "$release_tag" \
+              release/PrivateAI.dmg \
+              release/PrivateAI.dmg.sha256 \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$release_tag" \
+              release/PrivateAI.dmg \
+              release/PrivateAI.dmg.sha256 \
+              --target "$GITHUB_SHA" \
+              --title "$release_title" \
+              --notes "$release_notes" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
