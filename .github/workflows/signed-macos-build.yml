@@ -97,7 +97,7 @@ jobs:
         id: release-metadata
         shell: bash
         run: |
-          app_path="build/direct/PrivateAI.xcarchive/Products/Applications/PrivateAI.app"
+          app_path="build/direct/PrivateAI.xcarchive/Products/Applications/Private AI.app"
           marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
           build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_path/Contents/Info.plist")"
 

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Until the first stable release, security fixes are made on the latest release and the default branch only.
+PrivateAI is currently being rebuilt and has no supported release version. Security fixes apply to the default branch until a supported release policy is published.
 
 ## Reporting a vulnerability
 
@@ -11,7 +11,7 @@ Use GitHub Private Vulnerability Reporting on the repository's Security tab. Do 
 Include:
 
 - the affected version or commit;
-- macOS and Ollama versions;
+- macOS and Xcode versions, plus versions of any relevant external service;
 - clear reproduction steps;
 - the expected and actual security boundary;
 - impact and any known workaround.

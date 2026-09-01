@@ -12,25 +12,13 @@ Thank you for improving PrivateAI.
 
 ## Local development
 
-1. Install and start Ollama.
-2. Open `PrivateAI/PrivateAI.xcodeproj`.
-3. If you are not a member of the checked-in Apple development team, select your own Team and change the app and test bundle identifiers locally.
-4. Build the `PrivateAI` scheme or run the shared `PrivateAI-Tests` scheme.
+1. Open `Private AI/Private AI.xcodeproj`.
+2. If you are not a member of the checked-in Apple development team, select your own Team and change the app and test bundle identifiers locally.
+3. Build the `Private AI` target or run the unit-test and UI-test targets from Xcode.
+
+The repository is being rebuilt from a minimal application scaffold. Ollama, a web transcript build, and product-specific test fixtures are not current development prerequisites. Document new prerequisites only after the corresponding implementation is checked in.
 
 The checked-in Team ID and bundle identifiers identify the maintained app. They are not credentials and grant no signing access. Never submit a signing certificate, private key, provisioning profile, API key, token, password, notarization credential, or temporary keychain.
-
-## Generated web assets
-
-When changing `WebBuild/src/vendor.js` or dependencies, run:
-
-```bash
-cd WebBuild
-npm install
-npm test
-npm run build
-```
-
-Commit the regenerated `PrivateAI/PrivateAI/Web/vendor.js` only when its source or dependencies changed. Preserve all bundled third-party license files.
 
 ## Reporting security issues
 

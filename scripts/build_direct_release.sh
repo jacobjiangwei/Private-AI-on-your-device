@@ -2,11 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT="$ROOT/PrivateAI/PrivateAI.xcodeproj"
-SCHEME="PrivateAI"
+PROJECT="$ROOT/Private AI/Private AI.xcodeproj"
+SCHEME="Private AI"
 OUTPUT_DIRECTORY="${OUTPUT_DIRECTORY:-$ROOT/build/direct}"
 ARCHIVE_PATH="$OUTPUT_DIRECTORY/PrivateAI.xcarchive"
-APP_PATH="$ARCHIVE_PATH/Products/Applications/PrivateAI.app"
+APP_NAME="Private AI.app"
+APP_PATH="$ARCHIVE_PATH/Products/Applications/$APP_NAME"
 DMG_PATH="$OUTPUT_DIRECTORY/PrivateAI.dmg"
 STAGING_DIRECTORY="$OUTPUT_DIRECTORY/dmg-root"
 BUNDLE_ID="${PRODUCT_BUNDLE_IDENTIFIER:-com.jacobjiangwei.privateai}"
@@ -56,7 +57,7 @@ xcodebuild archive \
   "${build_number_setting[@]}"
 
 [[ -d "$APP_PATH" ]] || {
-  echo "Archive did not contain PrivateAI.app." >&2
+  echo "Archive did not contain $APP_NAME." >&2
   exit 1
 }
 
@@ -74,10 +75,10 @@ actual_bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP
 }
 
 mkdir -p "$STAGING_DIRECTORY"
-ditto "$APP_PATH" "$STAGING_DIRECTORY/PrivateAI.app"
+ditto "$APP_PATH" "$STAGING_DIRECTORY/$APP_NAME"
 ln -s /Applications "$STAGING_DIRECTORY/Applications"
 hdiutil create \
-  -volname PrivateAI \
+  -volname 'Private AI' \
   -srcfolder "$STAGING_DIRECTORY" \
   -ov \
   -format UDZO \

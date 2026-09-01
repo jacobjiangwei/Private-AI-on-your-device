@@ -1,19 +1,7 @@
 # Third-Party Notices
 
-PrivateAI includes generated browser assets from the following projects:
+The current PrivateAI application scaffold does not bundle the previously used generated browser assets, browser worker, Node.js runtime, Playwright, Chromium, or Ollama.
 
-- DOMPurify, Apache License 2.0 or Mozilla Public License 2.0
-- highlight.js, BSD 3-Clause License
-- KaTeX, MIT License
-- markdown-it, MIT License
+The target architecture proposes components such as a Markdown parser, HTML sanitizer, syntax highlighter, math renderer, model provider, and isolated browser runtime. Those proposals are not declarations that a dependency is currently included.
 
-The complete license texts distributed with the application are stored in `PrivateAI/PrivateAI/Web`:
-
-- `dompurify-LICENSE`
-- `highlight.js-LICENSE`
-- `katex-LICENSE`
-- `markdown-it-LICENSE`
-
-The source packages and pinned versions used to build the generated browser bundle are declared in `WebBuild/package.json` and `WebBuild/package-lock.json`.
-
-PrivateAI integrates with Ollama over its local HTTP API but does not redistribute the Ollama application or model files. Ollama and each model remain subject to their respective licenses and terms.
+When a third-party dependency or redistributable runtime is reintroduced, this file must be updated from the actual locked dependency graph and packaged artifacts. Required license texts and notices must ship with the application before distribution.

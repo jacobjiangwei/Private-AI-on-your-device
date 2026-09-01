@@ -1,0 +1,81 @@
+import Foundation
+import Testing
+@testable import LLMCore
+
+@Suite("Ollama Protocol")
+struct OllamaProtocolTests {
+    @Test("round-trips the official assistant tool-call message shape")
+    func officialToolCallRoundTrip() throws {
+        let json = Data(
+            #"""
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "type": "function",
+                  "function": {
+                    "index": 0,
+                    "name": "web",
+                    "arguments": {
+                      "action": "search",
+                      "query": "Suzhou current weather"
+                    }
+                  }
+                }
+              ]
+            }
+            """#.utf8
+        )
+
+        let message = try JSONDecoder().decode(ChatMessage.self, from: json)
+        let call = try #require(message.toolCalls?.first)
+
+        #expect(message.role == .assistant)
+        #expect(message.content.isEmpty)
+        #expect(call.type == "function")
+        #expect(call.function.index == 0)
+        #expect(call.function.name == "web")
+        #expect(call.function.arguments["action"] == .string("search"))
+
+        let encoded = try JSONEncoder().encode(message)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let calls = try #require(object["tool_calls"] as? [[String: Any]])
+        let encodedCall = try #require(calls.first)
+        let function = try #require(encodedCall["function"] as? [String: Any])
+
+        #expect(object["content"] == nil)
+        #expect(encodedCall["type"] as? String == "function")
+        #expect(function["index"] as? Int == 0)
+        #expect(function["name"] as? String == "web")
+    }
+
+    @Test("encodes the official assistant and tool result sequence")
+    func toolResultSequence() throws {
+        let call = ToolCall(
+            function: ToolFunctionCall(
+                index: 0,
+                name: "web",
+                arguments: ["action": .string("search"), "query": .string("Suzhou")]
+            )
+        )
+        let request = ModelRequest(
+            model: "qwen3",
+            messages: [
+                ChatMessage(role: .user, content: "What is the weather in Suzhou?"),
+                ChatMessage(role: .assistant, content: "", toolCalls: [call]),
+                ChatMessage(role: .tool, content: "28 C", toolName: "web")
+            ],
+            stream: false
+        )
+
+        let encoded = try JSONEncoder().encode(request)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let messages = try #require(object["messages"] as? [[String: Any]])
+
+        #expect(messages[1]["role"] as? String == "assistant")
+        #expect(messages[1]["tool_calls"] != nil)
+        #expect(messages[2]["role"] as? String == "tool")
+        #expect(messages[2]["tool_name"] as? String == "web")
+        #expect(messages[2]["content"] as? String == "28 C")
+    }
+}

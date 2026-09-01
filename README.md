@@ -1,49 +1,36 @@
 # PrivateAI
 
-PrivateAI is a native macOS assistant that runs user-selected models through Ollama on the same Mac. It keeps conversations, imported documents, memories, and diagnostics in the app sandbox while making optional network tools visible in the conversation.
+PrivateAI is being rebuilt as a native, on-device macOS assistant. The intended product direction is documented in [the target architecture draft](docs/product/target-architecture-draft.md).
 
 ## Status
 
-PrivateAI is early open-source software. Expect breaking changes and verify behavior before using it with sensitive or irreplaceable data.
+The repository currently contains a minimal Xcode application scaffold, not a usable AI assistant. Chat, model integration, Markdown rendering, persistence, document handling, tools, and release packaging have not yet been reimplemented. Expect breaking changes; current builds are for development only.
 
 ## Requirements
 
-- macOS 14 or later
-- Xcode 16 or later for source builds
-- [Ollama for macOS](https://ollama.com/download)
-- At least one Ollama model
+- macOS and an Xcode version that support the SDK and deployment target configured in the project
+
+Ollama and a local model are not required by the current scaffold. Runtime requirements will be documented when model integration is implemented.
 
 ## Build
 
-1. Install and start Ollama.
-2. Open `PrivateAI/PrivateAI.xcodeproj` in Xcode.
-3. Build and run the `PrivateAI` scheme.
+1. Open `Private AI/Private AI.xcodeproj` in Xcode.
+2. Select the `Private AI` target.
+3. Build and run the macOS app.
 
 The checked-in Team ID and bundle identifiers are public project metadata, not signing credentials. Maintainers with the matching local development certificate can build immediately. Other contributors should select their own Team and use a unique bundle identifier under Signing & Capabilities. The repository intentionally contains no signing certificate, private key, provisioning profile, API token, password, or notarization credential.
 
-## Web Transcript Assets
-
-The generated transcript bundle is committed so Xcode builds work without Node.js. To rebuild it:
-
-```bash
-cd WebBuild
-npm install
-npm run build
-```
-
-Third-party license texts for DOMPurify, highlight.js, KaTeX, and markdown-it ship with the app under `PrivateAI/PrivateAI/Web`.
-
 ## Tests
 
-Use the shared `PrivateAI-Tests` scheme in Xcode. Live Ollama evaluations and performance benchmarks are opt-in; deterministic protocol and application tests do not require a production account or cloud model.
+The Xcode project contains template unit-test and UI-test targets, but no meaningful product test suite yet. Test commands and fixtures will be documented as functionality is rebuilt.
 
 ## Releases
 
-Every push to `main` runs the signed GitHub Actions build, assigns the GitHub workflow run number as the app build number, and publishes a public GitHub Release such as `v1.0-build.42`. The workflow imports a Developer ID certificate from the protected `production` environment, archives the app, signs and notarizes a DMG, staples the Apple ticket, validates it with Gatekeeper, and publishes the DMG plus its SHA-256 checksum. See [the release setup guide](docs/direct-release.md).
+There is currently no supported release build. A retained GitHub Actions workflow describes the previous direct-distribution process, but it depends on deleted build scripts and must not be treated as operational. See [the paused release plan](docs/direct-release.md).
 
 ## Privacy
 
-Core inference is sent to the Ollama service on the same Mac. Optional web search, URL retrieval, public-network context, and nearby-search tools can contact external services when a request requires them. See [the privacy policy](docs/privacy-policy.md) for the current data-flow description.
+The current scaffold does not perform AI inference, import documents, or implement product network tools. See [the privacy policy](docs/privacy-policy.md) for the current development-state data flow.
 
 ## Security
 
@@ -55,4 +42,4 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 
 ## License
 
-PrivateAI source code is available under the [Apache License 2.0](LICENSE). Bundled third-party components retain their own license notices.
+PrivateAI source code is available under the [Apache License 2.0](LICENSE). Third-party notices must be updated whenever dependencies or redistributable components are introduced.
