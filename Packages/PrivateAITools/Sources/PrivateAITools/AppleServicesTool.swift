@@ -703,25 +703,46 @@ private func reverseGeocodedPlace(for location: CLLocation) async throws -> [Str
             )
         }
         request.preferredLocale = Locale.current
-        let items = try await retryingOnTransientNetworkError(
-            deadline: .seconds(30),
-            operation: "reverse_geocoding"
-        ) {
-            try await request.mapItems
-        }
-        guard let item = items.first else {
-            throw AppleServicesToolError.operationFailed(
-                "MapKit returned no address for the current coordinate."
-            )
-        }
-        let representations = item.addressRepresentations
+        // Keep the MapKit request and its non-Sendable [MKMapItem] result on the
+        // main actor: retry inline instead of routing them through a nonisolated
+        // generic helper, which newer SDKs reject as a cross-isolation transfer.
+        let start = ContinuousClock.now
+        let deadline: Duration = .seconds(30)
+        var attempt = 0
+        let firstItem: MKMapItem = try await {
+            while true {
+                attempt += 1
+                do {
+                    guard let item = try await request.mapItems.first else {
+                        throw AppleServicesToolError.operationFailed(
+                            "MapKit returned no address for the current coordinate."
+                        )
+                    }
+                    return item
+                } catch {
+                    let elapsed = ContinuousClock.now - start
+                    guard isTransientNetworkError(error), elapsed < deadline else { throw error }
+                    await ToolDiagnostics.record(
+                        "apple.mapkit.retrying",
+                        level: "warning",
+                        data: [
+                            "operation": "reverse_geocoding",
+                            "attempt": String(attempt),
+                            "error": error.localizedDescription
+                        ]
+                    )
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+            }
+        }()
+        let representations = firstItem.addressRepresentations
         return [
             "city": optionalStringValue(representations?.cityName),
             "city_with_context": optionalStringValue(representations?.cityWithContext),
             "country_or_region": optionalStringValue(representations?.regionName),
-            "formatted_address": optionalStringValue(item.address?.fullAddress),
-            "short_address": optionalStringValue(item.address?.shortAddress),
-            "time_zone": optionalStringValue(item.timeZone?.identifier)
+            "formatted_address": optionalStringValue(firstItem.address?.fullAddress),
+            "short_address": optionalStringValue(firstItem.address?.shortAddress),
+            "time_zone": optionalStringValue(firstItem.timeZone?.identifier)
         ]
     }
     return try await legacyReverseGeocodedPlace(for: location)
