@@ -697,55 +697,59 @@ private func retryingOnTransientNetworkError<Result>(
 @MainActor
 private func reverseGeocodedPlace(for location: CLLocation) async throws -> [String: JSONValue] {
     if #available(macOS 26.0, *) {
-        guard let request = MKReverseGeocodingRequest(location: location) else {
-            throw AppleServicesToolError.operationFailed(
-                "MapKit could not create a reverse-geocoding request."
-            )
-        }
-        request.preferredLocale = Locale.current
-        // Keep the MapKit request and its non-Sendable [MKMapItem] result on the
-        // main actor: retry inline instead of routing them through a nonisolated
-        // generic helper, which newer SDKs reject as a cross-isolation transfer.
-        let start = ContinuousClock.now
-        let deadline: Duration = .seconds(30)
-        var attempt = 0
-        let firstItem: MKMapItem = try await {
-            while true {
-                attempt += 1
-                do {
-                    guard let item = try await request.mapItems.first else {
-                        throw AppleServicesToolError.operationFailed(
-                            "MapKit returned no address for the current coordinate."
-                        )
-                    }
-                    return item
-                } catch {
-                    let elapsed = ContinuousClock.now - start
-                    guard isTransientNetworkError(error), elapsed < deadline else { throw error }
-                    await ToolDiagnostics.record(
-                        "apple.mapkit.retrying",
-                        level: "warning",
-                        data: [
-                            "operation": "reverse_geocoding",
-                            "attempt": String(attempt),
-                            "error": error.localizedDescription
-                        ]
-                    )
-                    try? await Task.sleep(for: .milliseconds(500))
-                }
-            }
-        }()
-        let representations = firstItem.addressRepresentations
-        return [
-            "city": optionalStringValue(representations?.cityName),
-            "city_with_context": optionalStringValue(representations?.cityWithContext),
-            "country_or_region": optionalStringValue(representations?.regionName),
-            "formatted_address": optionalStringValue(firstItem.address?.fullAddress),
-            "short_address": optionalStringValue(firstItem.address?.shortAddress),
-            "time_zone": optionalStringValue(firstItem.timeZone?.identifier)
-        ]
+        return try await modernReverseGeocodedPlace(for: location)
     }
     return try await legacyReverseGeocodedPlace(for: location)
+}
+
+// `MKReverseGeocodingRequest` and its `[MKMapItem]` result are non-Sendable, and
+// `mapItems` is a `nonisolated async` property. Perform the whole request in a
+// single nonisolated context so those non-Sendable values never cross an actor
+// boundary; only the fully-formed, Sendable dictionary leaves this function.
+@available(macOS 26.0, *)
+private func modernReverseGeocodedPlace(for location: CLLocation) async throws -> [String: JSONValue] {
+    guard let request = MKReverseGeocodingRequest(location: location) else {
+        throw AppleServicesToolError.operationFailed(
+            "MapKit could not create a reverse-geocoding request."
+        )
+    }
+    request.preferredLocale = Locale.current
+
+    let start = ContinuousClock.now
+    let deadline: Duration = .seconds(30)
+    var attempt = 0
+    while true {
+        attempt += 1
+        do {
+            guard let firstItem = try await request.mapItems.first else {
+                throw AppleServicesToolError.operationFailed(
+                    "MapKit returned no address for the current coordinate."
+                )
+            }
+            let representations = firstItem.addressRepresentations
+            return [
+                "city": optionalStringValue(representations?.cityName),
+                "city_with_context": optionalStringValue(representations?.cityWithContext),
+                "country_or_region": optionalStringValue(representations?.regionName),
+                "formatted_address": optionalStringValue(firstItem.address?.fullAddress),
+                "short_address": optionalStringValue(firstItem.address?.shortAddress),
+                "time_zone": optionalStringValue(firstItem.timeZone?.identifier)
+            ]
+        } catch {
+            let elapsed = ContinuousClock.now - start
+            guard isTransientNetworkError(error), elapsed < deadline else { throw error }
+            await ToolDiagnostics.record(
+                "apple.mapkit.retrying",
+                level: "warning",
+                data: [
+                    "operation": "reverse_geocoding",
+                    "attempt": String(attempt),
+                    "error": error.localizedDescription
+                ]
+            )
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
 }
 
 @available(macOS, introduced: 14.0, obsoleted: 26.0)
