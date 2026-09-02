@@ -78,4 +78,21 @@ struct OllamaProtocolTests {
         #expect(messages[2]["tool_name"] as? String == "web")
         #expect(messages[2]["content"] as? String == "28 C")
     }
+
+      @Test("decodes the provider finish reason into model usage")
+      func finishReason() throws {
+        let chunk = try JSONDecoder().decode(OllamaChatChunk.self, from: Data(#"""
+        {
+          "message": {"role":"assistant","content":"partial"},
+          "done": true,
+          "done_reason": "length",
+          "prompt_eval_count": 100,
+          "eval_count": 32
+        }
+        """#.utf8))
+
+        #expect(chunk.usage.finishReason == "length")
+        #expect(chunk.usage.promptTokenCount == 100)
+        #expect(chunk.usage.outputTokenCount == 32)
+      }
 }

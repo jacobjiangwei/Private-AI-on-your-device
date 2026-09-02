@@ -1,12 +1,18 @@
 import Foundation
 
-struct ManagedRuntimeDirectory {
+nonisolated struct ManagedRuntimeDirectory {
     let root: URL
     let logs: URL
+    let artifacts: URL
+    let jobs: URL
+    let state: URL
 
     init(fileManager: FileManager = .default) throws {
         root = fileManager.homeDirectoryForCurrentUser.appending(path: ".privateAI", directoryHint: .isDirectory)
         logs = root.appending(path: "logs", directoryHint: .isDirectory)
+        artifacts = root.appending(path: "artifacts", directoryHint: .isDirectory)
+        jobs = root.appending(path: "jobs", directoryHint: .isDirectory)
+        state = root.appending(path: "state", directoryHint: .isDirectory)
         for directory in ["workspaces", "jobs", "logs", "artifacts", "state"] {
             try fileManager.createDirectory(
                 at: root.appending(path: directory, directoryHint: .isDirectory),
@@ -42,9 +48,41 @@ actor RuntimeLog {
             at: self.runsDirectory,
             withIntermediateDirectories: true
         )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: fileURL.deletingLastPathComponent().path
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: self.runsDirectory.path
+        )
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             try Data().write(to: fileURL, options: .atomic)
         }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: fileURL.path
+        )
+    }
+
+    static func preparePrivacyMigration(
+        logsDirectory: URL,
+        stateDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let marker = stateDirectory.appending(path: "runtime-log-privacy-v1")
+        guard !fileManager.fileExists(atPath: marker.path) else { return }
+        if fileManager.fileExists(atPath: logsDirectory.path) {
+            try fileManager.removeItem(at: logsDirectory)
+        }
+        try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: logsDirectory.path
+        )
+        try Data("1\n".utf8).write(to: marker, options: .atomic)
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: marker.path)
     }
 
     func record(
@@ -72,6 +110,10 @@ actor RuntimeLog {
         let destination = runID.map(runFileURLValue) ?? fileURL
           if !FileManager.default.fileExists(atPath: destination.path) {
             try? Data().write(to: destination, options: .atomic)
+                        try? FileManager.default.setAttributes(
+                                [.posixPermissions: 0o600],
+                                ofItemAtPath: destination.path
+                        )
           }
           guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               let handle = try? FileHandle(forWritingTo: destination)

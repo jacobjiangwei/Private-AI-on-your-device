@@ -1,28 +1,32 @@
 # PrivateAI Privacy Policy
 
-Effective date: 2026-08-29
+Effective date: 2026-09-01
 
-PrivateAI is currently a development scaffold for a macOS app being rebuilt from the beginning. It is not a supported product release. This policy describes the code currently checked into this repository; planned behavior belongs in product and architecture documents, not in this current-data-flow statement.
+PrivateAI is currently a development build, not a supported product release. This policy describes the code currently checked into this repository; planned behavior belongs in product and architecture documents, not in this current-data-flow statement.
 
 ## Core AI processing
 
-The current scaffold does not implement chat, connect to Ollama or another model provider, process prompts, or send AI content to a local or cloud model.
+PrivateAI sends the system prompt, conversation context, current request, selected Tool schemas, and Tool results to the user's local Ollama service. The checked-in App does not configure a cloud model provider. Ollama is a separate local process with its own configuration and data handling.
 
 ## Data stored on the Mac
 
-The current Xcode scaffold contains only template local persistence code. It does not store chats, memories, imported documents, extracted text, model profiles, or product diagnostic logs. Data created by a local development build remains in that build's app container unless it is removed through development tooling or by deleting the container.
+PrivateAI stores conversations and messages in a local SwiftData database. It copies selected document bytes into content-addressed managed storage under `~/.privateAI/artifacts`. For whole-document analysis, intermediate page, chunk, and reduction summaries are stored as private checkpoint files under `~/.privateAI/jobs/document-summaries` so interrupted work can resume and identical work can be reused. Extracted source text and full local-document Tool results are not stored as Tool transcript rows or runtime logs, but intermediate summaries and the model's final stored answer may quote or summarize document content.
+
+PrivateAI writes bounded operational metadata to private files under `~/.privateAI/logs`. Current logs omit prompt text, model answer text, local document paths, local document search queries, and local document Tool output. A one-time privacy migration deletes logs created by earlier development builds that may have contained those values.
 
 ## Network features
 
-The current scaffold does not implement web search, URL retrieval, public-IP lookup, nearby search, analytics, advertising, or other product network features.
+PrivateAI includes public web and Apple service Tools. When the model invokes a network Tool, the requested query, URL, coordinates, or other necessary Tool input may be sent to the relevant public endpoint or Apple service. The checked-in App does not implement advertising or product analytics.
+
+Conversations containing document attachments run in document privacy mode. In that mode the model is given only the local document analysis and bounded local resource Tools; public web and Apple service Tools are unavailable, so document content cannot be silently forwarded through those capabilities.
 
 ## File access
 
-The current scaffold does not implement file selection, drag and drop, paste-based import, or document processing.
+Users can select documents in a system file panel or drop supported Finder file URLs onto the composer. PrivateAI accesses the selected source while importing it, then uses the managed copy for later reads. The model-facing document Tool is restricted to the managed artifacts root. Searchable PDFs are read with PDFKit; scanned PDFs without a text layer are not processed with OCR.
 
 ## Security and retention
 
-Current development builds use the entitlements and sandbox configuration in the Xcode project. There are no product-level chat, memory, or document deletion controls yet. Removing the development app's container removes data retained in that container.
+The current development target has App Sandbox disabled. Managed artifact and log directories are set to owner-only permissions (`0700`), and managed files are set to `0600`. Deleting a conversation removes its attachment references; unreferenced managed blobs are reclaimed by reconciliation. Deleting the App alone does not necessarily remove data under `~/.privateAI`; developers can remove that directory to delete managed artifacts and logs.
 
 ## Changes and contact
 

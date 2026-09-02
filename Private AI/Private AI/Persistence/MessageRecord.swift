@@ -26,6 +26,8 @@ final class MessageRecord {
     var errorMessage: String?
     var toolName: String?
     var conversation: ConversationRecord?
+    @Relationship(deleteRule: .cascade, inverse: \ConversationArtifactRecord.message)
+    var attachments: [ConversationArtifactRecord]
 
     var role: PersistedMessageRole {
         get { PersistedMessageRole(rawValue: roleRawValue) ?? .assistant }
@@ -46,7 +48,8 @@ final class MessageRecord {
         createdAt: Date = .now,
         errorMessage: String? = nil,
         toolName: String? = nil,
-        conversation: ConversationRecord? = nil
+        conversation: ConversationRecord? = nil,
+        attachments: [ConversationArtifactRecord] = []
     ) {
         self.id = id
         self.sequence = sequence
@@ -57,5 +60,6 @@ final class MessageRecord {
         self.errorMessage = errorMessage
         self.toolName = toolName
         self.conversation = conversation
+        self.attachments = attachments
     }
 }

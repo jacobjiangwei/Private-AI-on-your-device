@@ -71,6 +71,7 @@ public enum AgentEvent: Equatable, Sendable {
     case text(String)
     case toolCallsProposed(round: Int, calls: [ToolCall])
     case toolStarted(name: String, arguments: [String: JSONValue])
+    case toolProgress(name: String, detail: String)
     case toolFinished(ToolExecution)
     case contextTrimmed(droppedMessages: Int, approximateBytesBefore: Int, approximateBytesAfter: Int)
 }
@@ -93,6 +94,7 @@ public enum AgentRuntimeError: Error, Equatable, LocalizedError, Sendable {
     case toolCallLimitExceeded(perRound: Int, total: Int)
     case repeatedToolFailure(name: String, attempts: Int)
     case responseTooLarge(Int)
+    case requiredContextTooLarge(required: Int, budget: Int)
     case streamEndedWithoutCompletion
 
     public var errorDescription: String? {
@@ -107,6 +109,8 @@ public enum AgentRuntimeError: Error, Equatable, LocalizedError, Sendable {
             "Tool '\(name)' failed with identical arguments \(attempts) times."
         case .responseTooLarge(let limit):
             "The model response exceeded the \(limit)-byte limit."
+        case .requiredContextTooLarge(let required, let budget):
+            "The required system prompt and current task need approximately \(required) bytes, exceeding the \(budget)-byte context budget."
         case .streamEndedWithoutCompletion:
             "The model stream ended without a completion event."
         }
@@ -227,20 +231,40 @@ public actor AgentRuntime {
         var toolCallCount = 0
         var failedCallCounts: [String: Int] = [:]
         var usages: [ModelUsage] = []
+        var forceToolFreeFinalization = false
+        var finalizationReminderAdded = false
+        var finalizationCorrectionUsed = false
         var messages = [ChatMessage(role: .system, content: configuration.systemPrompt)]
         messages.append(contentsOf: history.filter { $0.role != .system })
+        let currentUserIndex = messages.count
         messages.append(ChatMessage(role: .user, content: trimmedPrompt))
         let toolDefinitions = await toolRuntime.definitions
 
         // Reserve part of the context window for generation and chat-template overhead.
         let contextBudgetBytes = Int(Double(configuration.options.numContext) * 3.0 * 0.6)
 
-        for round in 0...configuration.maximumToolRounds {
+        for round in 0...(configuration.maximumToolRounds + 1) {
             try Task.checkCancellation()
+            let shouldFinalizeWithoutTools = forceToolFreeFinalization
+                || toolCallCount >= configuration.maximumToolCallsTotal
+                || round >= configuration.maximumToolRounds
+            if shouldFinalizeWithoutTools, !finalizationReminderAdded {
+                messages[currentUserIndex] = ChatMessage(
+                    role: .user,
+                    content: trimmedPrompt + "\n\n" + toolBudgetFinalizationInstruction
+                )
+                finalizationReminderAdded = true
+            }
             modelRequestCount += 1
             await onEvent(.modelRequestStarted(round: round))
 
             let trim = trimMessagesToBudget(messages, budgetBytes: contextBudgetBytes)
+            if trim.requiredBytesExceededBudget {
+                throw AgentRuntimeError.requiredContextTooLarge(
+                    required: trim.requiredBytes,
+                    budget: contextBudgetBytes
+                )
+            }
             if trim.didTrim {
                 await onEvent(.contextTrimmed(
                     droppedMessages: trim.droppedCount,
@@ -252,7 +276,7 @@ public actor AgentRuntime {
             let request = ModelRequest(
                 model: configuration.model,
                 messages: trim.messages,
-                tools: toolCallCount < configuration.maximumToolCallsTotal ? toolDefinitions : [],
+                tools: shouldFinalizeWithoutTools ? [] : toolDefinitions,
                 think: configuration.think,
                 keepAlive: configuration.keepAlive,
                 options: configuration.options
@@ -297,16 +321,12 @@ public actor AgentRuntime {
                 throw AgentRuntimeError.streamEndedWithoutCompletion
             }
 
-            messages.append(
-                ChatMessage(
+            guard !proposedCalls.isEmpty else {
+                messages.append(ChatMessage(
                     role: .assistant,
                     content: responseText,
-                    thinking: responseThinking.isEmpty ? nil : responseThinking,
-                    toolCalls: proposedCalls.isEmpty ? nil : proposedCalls
-                )
-            )
-
-            guard !proposedCalls.isEmpty else {
+                    thinking: responseThinking.isEmpty ? nil : responseThinking
+                ))
                 return AgentResult(
                     text: responseText,
                     messages: messages,
@@ -321,19 +341,59 @@ public actor AgentRuntime {
                 )
             }
 
-            guard proposedCalls.count <= configuration.maximumToolCallsPerRound,
-                  toolCallCount + proposedCalls.count <= configuration.maximumToolCallsTotal
-            else {
+            if shouldFinalizeWithoutTools {
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    content: responseText,
+                    thinking: responseThinking.isEmpty ? nil : responseThinking
+                ))
+                guard !finalizationCorrectionUsed else {
+                    throw AgentRuntimeError.toolCallLimitExceeded(
+                        perRound: configuration.maximumToolCallsPerRound,
+                        total: configuration.maximumToolCallsTotal
+                    )
+                }
+                messages[currentUserIndex] = ChatMessage(
+                    role: .user,
+                    content: trimmedPrompt
+                        + "\n\n"
+                        + toolBudgetFinalizationInstruction
+                        + "\n\n"
+                        + toolBudgetCorrectionInstruction
+                )
+                forceToolFreeFinalization = true
+                finalizationCorrectionUsed = true
+                continue
+            }
+
+            guard proposedCalls.count <= configuration.maximumToolCallsPerRound else {
                 throw AgentRuntimeError.toolCallLimitExceeded(
                     perRound: configuration.maximumToolCallsPerRound,
                     total: configuration.maximumToolCallsTotal
                 )
             }
 
-            guard round < configuration.maximumToolRounds else {
-                throw AgentRuntimeError.toolRoundLimitExceeded(configuration.maximumToolRounds)
+            if toolCallCount + proposedCalls.count > configuration.maximumToolCallsTotal {
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    content: responseText,
+                    thinking: responseThinking.isEmpty ? nil : responseThinking
+                ))
+                messages[currentUserIndex] = ChatMessage(
+                    role: .user,
+                    content: trimmedPrompt + "\n\n" + toolBudgetFinalizationInstruction
+                )
+                forceToolFreeFinalization = true
+                finalizationReminderAdded = true
+                continue
             }
 
+            messages.append(ChatMessage(
+                role: .assistant,
+                content: responseText,
+                thinking: responseThinking.isEmpty ? nil : responseThinking,
+                toolCalls: proposedCalls
+            ))
             toolCallCount += proposedCalls.count
             let batches = await makeToolBatches(proposedCalls)
             var executions: [ToolExecution] = []
@@ -421,6 +481,14 @@ public actor AgentRuntime {
     }
 }
 
+private let toolBudgetFinalizationInstruction = """
+The tool-call budget for this run is exhausted. Do not call any tool. Answer the user's request now using only the evidence already gathered. Be explicit about any material limitation caused by incomplete evidence.
+"""
+
+private let toolBudgetCorrectionInstruction = """
+The previous tool proposal could not be executed because the tool-call budget is exhausted. Do not propose or mention another tool call. Produce the best final answer now from the evidence already available, and state any important coverage limitation.
+"""
+
 private struct IndexedToolCall: Sendable {
     let index: Int
     let call: ToolCall
@@ -450,11 +518,13 @@ struct ContextTrimResult: Equatable {
     let droppedCount: Int
     let bytesBefore: Int
     let bytesAfter: Int
+    let requiredBytes: Int
+    let requiredBytesExceededBudget: Bool
     var didTrim: Bool { droppedCount > 0 }
 }
 
 /// Keeps the request within the context budget while guaranteeing the system prompt
-/// and the first user query are never dropped, so the model always sees the task.
+/// and current user query are never dropped, so the model always sees the active task.
 /// Older middle messages (tool results, earlier turns) are removed first, newest kept.
 func trimMessagesToBudget(_ messages: [ChatMessage], budgetBytes: Int) -> ContextTrimResult {
     func bytes(_ message: ChatMessage) -> Int {
@@ -478,27 +548,35 @@ func trimMessagesToBudget(_ messages: [ChatMessage], budgetBytes: Int) -> Contex
             messages: messages,
             droppedCount: 0,
             bytesBefore: bytesBefore,
-            bytesAfter: bytesBefore
+            bytesAfter: bytesBefore,
+            requiredBytes: 0,
+            requiredBytesExceededBudget: false
         )
     }
 
-    // Protected: system prompt (if first) and the first user message — the task itself.
+    // Protected: system prompt (if first) and the last user message — the current task.
     var protectedIndices = Set<Int>()
     if let first = messages.first, first.role == .system {
         protectedIndices.insert(0)
     }
-    if let firstUser = messages.firstIndex(where: { $0.role == .user }) {
-        protectedIndices.insert(firstUser)
+    if let currentUser = messages.lastIndex(where: { $0.role == .user }) {
+        protectedIndices.insert(currentUser)
     }
 
-    var kept = protectedIndices
-    var used = protectedIndices.reduce(0) { $0 + bytes(messages[$1]) }
+    let groups = messageGroups(messages)
+    let protectedGroups = groups.filter { group in
+        !group.indices.isDisjoint(with: protectedIndices)
+    }
+    var kept = Set(protectedGroups.flatMap(\.indices))
+    let requiredBytes = kept.reduce(0) { $0 + bytes(messages[$1]) }
+    var used = requiredBytes
 
-    // Add newest-to-oldest until the budget is exhausted.
-    for index in stride(from: messages.count - 1, through: 0, by: -1) where !kept.contains(index) {
-        let cost = bytes(messages[index])
+    // Add newest complete turns first. Tool proposals and their results are indivisible.
+    for group in groups.reversed()
+        where group.indices.isDisjoint(with: kept) {
+        let cost = group.indices.reduce(0) { $0 + bytes(messages[$1]) }
         if used + cost <= budgetBytes {
-            kept.insert(index)
+            kept.formUnion(group.indices)
             used += cost
         }
     }
@@ -512,6 +590,38 @@ func trimMessagesToBudget(_ messages: [ChatMessage], budgetBytes: Int) -> Contex
         messages: trimmed,
         droppedCount: messages.count - trimmed.count,
         bytesBefore: bytesBefore,
-        bytesAfter: bytesAfter
+        bytesAfter: bytesAfter,
+        requiredBytes: requiredBytes,
+        requiredBytesExceededBudget: requiredBytes > budgetBytes
     )
+}
+
+private struct ContextMessageGroup {
+    let indices: Set<Int>
+}
+
+private func messageGroups(_ messages: [ChatMessage]) -> [ContextMessageGroup] {
+    var groups: [ContextMessageGroup] = []
+    var index = 0
+    while index < messages.count {
+        let message = messages[index]
+        if message.role == .assistant, let calls = message.toolCalls, !calls.isEmpty {
+            var indices: Set<Int> = [index]
+            var next = index + 1
+            var remainingResults = calls.count
+            while next < messages.count,
+                  remainingResults > 0,
+                  messages[next].role == .tool {
+                indices.insert(next)
+                next += 1
+                remainingResults -= 1
+            }
+            groups.append(ContextMessageGroup(indices: indices))
+            index = next
+        } else {
+            groups.append(ContextMessageGroup(indices: [index]))
+            index += 1
+        }
+    }
+    return groups
 }

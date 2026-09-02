@@ -1,14 +1,14 @@
-# Planned Signed Direct Release Setup
+# Signed Direct Release
 
-> **Status: Paused during the rebuild.** The retained workflow references deleted build scripts and old artifact names. It is not currently a working release path, and a push to `main` must not be interpreted as producing a valid release.
+> **Status: Operational.** The `Signed macOS build` workflow successfully produced the signed, notarized, stapled, Gatekeeper-validated `v1.0-build.6` release on 2026-09-01. Pushes to `main` publish a release only after every signing and validation step succeeds.
 
-This document records the previous direct-distribution design so it can be reassessed when release engineering resumes. The planned workflow would use the paid Apple Developer Program's Developer ID and notarization services:
+The direct-distribution workflow uses the paid Apple Developer Program's Developer ID and notarization services:
 
 - A successful push build on `main` would upload a short-lived Actions artifact and create a public GitHub Release.
 - A successful manual run would upload an Actions artifact without changing a public release.
 - Pull requests never receive signing or notarization secrets.
 
-The previous design used the Xcode `MARKETING_VERSION` as the user-facing version and GitHub's monotonically increasing workflow `run_number` as `CFBundleVersion`. These conventions must be revalidated against the rebuilt target, product name, archive path, scripts, and release policy before the workflow is enabled for publishing.
+The workflow uses Xcode `MARKETING_VERSION` as the user-facing version and GitHub's monotonically increasing workflow `run_number` as `CFBundleVersion`.
 
 Releases are public only while the GitHub repository itself is public.
 
@@ -88,10 +88,8 @@ Never commit the unencoded or base64-encoded certificate, private key, password,
 
 The PKCS#12 export must contain a valid `Developer ID Application` certificate and its private key. Apple Development and Mac App Distribution certificates are not valid substitutes for direct distribution.
 
-## 6. Restore, validate, and publish
+## 6. Validate and publish
 
-Do not configure production secrets or publish a release from the retained workflow until its missing scripts and artifact assumptions have been replaced. First restore the build/package implementation, restrict publishing to an explicit manual validation path, and verify the rebuilt product name and bundle identifier.
+Run **Signed macOS build** manually to validate signing and notarization without changing the public Releases page. A push to `main` runs the same build and publishes `PrivateAI.dmg` plus `PrivateAI.dmg.sha256` as `v<MARKETING_VERSION>-build.<run_number>` only when the pushed commit is still the latest `main` commit.
 
-Then run **Signed macOS build** manually. A successful validation must produce a correctly signed and notarized artifact without changing the public Releases page. Automatic `main` publishing may be restored only after that manual path passes end to end.
-
-The rebuilt workflow must define its actual DMG and checksum names, submit the signed DMG to Apple's notary service, staple the ticket, validate it with Gatekeeper, and update the appropriate GitHub Release. A failed build, signing, notarization, stapling, Gatekeeper, or checksum step must prevent publication.
+The workflow archives the Release target, verifies the Developer ID signature, creates and signs the DMG, submits it to Apple notarization, staples and validates the ticket, assesses it with Gatekeeper, generates the checksum, and uploads both assets. A failure in any step prevents publication.

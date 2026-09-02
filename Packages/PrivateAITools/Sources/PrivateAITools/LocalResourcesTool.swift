@@ -1,7 +1,11 @@
 import Foundation
 import LLMCore
 import PDFKit
-import UniformTypeIdentifiers
+
+public enum LocalResourcesAccess: Sendable {
+    case restricted([URL])
+    case unrestricted
+}
 
 public enum LocalResourcesToolError: Error, Equatable, LocalizedError, Sendable {
     case outsideAuthorizedRoots(String)
@@ -10,7 +14,10 @@ public enum LocalResourcesToolError: Error, Equatable, LocalizedError, Sendable 
     case fileTooLarge(Int)
     case unreadablePDF
     case lockedPDF
+    case pdfHasNoExtractableText
     case invalidPageRange
+    case invalidCharacterRange
+    case unreadableTextEncoding
 
     public var errorDescription: String? {
         switch self {
@@ -26,8 +33,14 @@ public enum LocalResourcesToolError: Error, Equatable, LocalizedError, Sendable 
             "PDFKit could not open the PDF document."
         case .lockedPDF:
             "The PDF document is locked and cannot be read."
+        case .pdfHasNoExtractableText:
+            "The requested PDF pages do not contain an extractable text layer."
         case .invalidPageRange:
             "The requested PDF page range is invalid."
+        case .invalidCharacterRange:
+            "The requested document character range is invalid."
+        case .unreadableTextEncoding:
+            "The document text encoding could not be decoded reliably."
         }
     }
 }
@@ -36,17 +49,20 @@ public actor LocalResourcesTool: LLMTool {
     public nonisolated let definition = ToolDefinition(
         function: ToolFunctionDefinition(
             name: "local_resources",
-            description: "Work with local directories and documents on this Mac. List directory contents, read documents, or search within documents. Supported documents include Markdown, plain text, HTML, JSON, CSV, XML, YAML, source code, and PDF.",
+            description: "Work with local directories and documents on this Mac. List directory contents, read a bounded range, or search within a document. Use document_analysis instead for a whole-document summary or review; do not repeatedly walk every read cursor. Supported documents include Markdown, plain text, HTML, JSON, CSV, XML, YAML, source code, and PDF.",
             parameters: objectSchema(
                 properties: [
                     "action": stringSchema(
-                        description: "Operation: list returns directory entries; read returns document content; search finds text within one document.",
+                        description: "Operation: list returns directory entries; read returns one bounded range; search finds specific text.",
                         values: ["list", "read", "search"]
                     ),
-                    "path": stringSchema(description: "Absolute path to a local directory or document. Tilde (~) is expanded to the user's home directory."),
+                    "path": stringSchema(description: "Absolute path or path relative to an authorized local root. Tilde (~) is expanded to the user's home directory."),
                     "query": stringSchema(description: "Text to find when action is search."),
-                    "page_start": integerSchema(description: "Optional first PDF page to read, one-based and inclusive.", range: 1...100_000),
-                    "page_end": integerSchema(description: "Optional last PDF page to read, one-based and inclusive.", range: 1...100_000),
+                    "page_start": integerSchema(description: "Optional first PDF page to read or search, one-based and inclusive.", range: 1...100_000),
+                    "page_end": integerSchema(description: "Optional last PDF page to read or search, one-based and inclusive.", range: 1...100_000),
+                    "page_offset": integerSchema(description: "Optional zero-based character offset within page_start when continuing a truncated PDF read.", range: 0...10_000_000),
+                    "character_offset": integerSchema(description: "Optional zero-based character offset when continuing a truncated non-PDF read.", range: 0...10_000_000),
+                    "character_limit": integerSchema(description: "Optional maximum characters to return, bounded by the application.", range: 1...200_000),
                     "limit": integerSchema(description: "Optional maximum directory entries or search matches.", range: 1...500)
                 ],
                 required: ["action", "path"]
@@ -54,10 +70,29 @@ public actor LocalResourcesTool: LLMTool {
         )
     )
 
-    private let authorizedRoots: [URL]
+    private let access: LocalResourcesAccess
     private let maximumFileBytes: Int
     private let maximumTextCharacters: Int
     private let fileManager: FileManager
+
+    public init(
+        access: LocalResourcesAccess,
+        maximumFileBytes: Int = 20 * 1_024 * 1_024,
+        maximumTextCharacters: Int = 200_000,
+        fileManager: FileManager = .default
+    ) {
+        switch access {
+        case .restricted(let roots):
+            self.access = .restricted(roots.map {
+                $0.standardizedFileURL.resolvingSymlinksInPath()
+            })
+        case .unrestricted:
+            self.access = .unrestricted
+        }
+        self.maximumFileBytes = maximumFileBytes
+        self.maximumTextCharacters = maximumTextCharacters
+        self.fileManager = fileManager
+    }
 
     public init(
         authorizedRoots: [URL],
@@ -65,12 +100,12 @@ public actor LocalResourcesTool: LLMTool {
         maximumTextCharacters: Int = 200_000,
         fileManager: FileManager = .default
     ) {
-        self.authorizedRoots = authorizedRoots.map {
-            $0.standardizedFileURL.resolvingSymlinksInPath()
-        }
-        self.maximumFileBytes = maximumFileBytes
-        self.maximumTextCharacters = maximumTextCharacters
-        self.fileManager = fileManager
+        self.init(
+            access: authorizedRoots.isEmpty ? .unrestricted : .restricted(authorizedRoots),
+            maximumFileBytes: maximumFileBytes,
+            maximumTextCharacters: maximumTextCharacters,
+            fileManager: fileManager
+        )
     }
 
     public nonisolated func isConcurrencySafe(arguments: [String: JSONValue]) -> Bool {
@@ -101,18 +136,26 @@ public actor LocalResourcesTool: LLMTool {
                 limit: try values.optionalInteger("limit", range: 1...500) ?? 100
             )
         case "read":
-            try values.requireOnly(["action", "path", "page_start", "page_end"])
+            try values.requireOnly([
+                "action", "path", "page_start", "page_end", "page_offset",
+                "character_offset", "character_limit"
+            ])
             result = try readDocument(
                 resource.url,
                 pageStart: try values.optionalInteger("page_start", range: 1...100_000),
-                pageEnd: try values.optionalInteger("page_end", range: 1...100_000)
+                pageEnd: try values.optionalInteger("page_end", range: 1...100_000),
+                pageOffset: try values.optionalInteger("page_offset", range: 0...10_000_000),
+                characterOffset: try values.optionalInteger("character_offset", range: 0...10_000_000),
+                characterLimit: try values.optionalInteger("character_limit", range: 1...200_000)
             )
         case "search":
-            try values.requireOnly(["action", "path", "query", "limit"])
+            try values.requireOnly(["action", "path", "query", "limit", "page_start", "page_end"])
             result = try searchDocument(
                 resource.url,
                 query: try values.requiredString("query", maximumBytes: 2_048),
-                limit: try values.optionalInteger("limit", range: 1...500) ?? 50
+                limit: try values.optionalInteger("limit", range: 1...500) ?? 50,
+                pageStart: try values.optionalInteger("page_start", range: 1...100_000),
+                pageEnd: try values.optionalInteger("page_end", range: 1...100_000)
             )
         default:
             throw CapabilityToolError.unsupportedAction(action)
@@ -126,21 +169,25 @@ public actor LocalResourcesTool: LLMTool {
         let candidate: URL
         if expanded.hasPrefix("/") {
             candidate = URL(fileURLWithPath: expanded)
-        } else if let base = authorizedRoots.first {
-            candidate = base.appending(path: expanded)
         } else {
-            candidate = URL(fileURLWithPath: fileManager.homeDirectoryForCurrentUser.path)
-                .appending(path: expanded)
+            switch access {
+            case .restricted(let roots):
+                candidate = (roots.first ?? fileManager.homeDirectoryForCurrentUser)
+                    .appending(path: expanded)
+            case .unrestricted:
+                candidate = fileManager.homeDirectoryForCurrentUser.appending(path: expanded)
+            }
         }
         let resolved = candidate.standardizedFileURL.resolvingSymlinksInPath()
-        // Empty authorizedRoots means unrestricted: the tool reads anything the process can access.
         let root: URL
-        if authorizedRoots.isEmpty {
+        switch access {
+        case .unrestricted:
             root = resolved
-        } else if let matched = authorizedRoots.first(where: { contains(resolved, root: $0) }) {
+        case .restricted(let roots):
+            guard let matched = roots.first(where: { contains(resolved, root: $0) }) else {
+                throw LocalResourcesToolError.outsideAuthorizedRoots(path)
+            }
             root = matched
-        } else {
-            throw LocalResourcesToolError.outsideAuthorizedRoots(path)
         }
         guard fileManager.fileExists(atPath: resolved.path) else {
             throw LocalResourcesToolError.resourceNotFound(path)
@@ -194,25 +241,81 @@ public actor LocalResourcesTool: LLMTool {
     private func readDocument(
         _ url: URL,
         pageStart: Int?,
-        pageEnd: Int?
+        pageEnd: Int?,
+        pageOffset: Int?,
+        characterOffset: Int?,
+        characterLimit: Int?
     ) throws -> JSONValue {
-        let format = documentFormat(for: url)
+        let format = LocalDocumentFormat.detect(url: url)
         if format == .pdf {
-            return try readPDF(url, pageStart: pageStart, pageEnd: pageEnd)
+            guard characterOffset == nil else {
+                throw LocalResourcesToolError.invalidCharacterRange
+            }
+            return try readPDF(
+                url,
+                pageStart: pageStart,
+                pageEnd: pageEnd,
+                pageOffset: pageOffset,
+                characterLimit: characterLimit
+            )
         }
-        guard pageStart == nil, pageEnd == nil else {
+        guard pageStart == nil, pageEnd == nil, pageOffset == nil else {
             throw LocalResourcesToolError.invalidPageRange
         }
-        return try readText(url, format: format)
+        return try readText(
+            url,
+            format: format,
+            characterOffset: characterOffset,
+            characterLimit: characterLimit
+        )
     }
 
-    private func readText(_ url: URL, format: DocumentFormat? = nil) throws -> JSONValue {
+    private func readText(
+        _ url: URL,
+        format: LocalDocumentFormat? = nil,
+        characterOffset: Int? = nil,
+        characterLimit: Int? = nil
+    ) throws -> JSONValue {
+        let loaded = try loadText(url, format: format)
+        let offset = characterOffset ?? 0
+        guard offset <= loaded.text.count else {
+            throw LocalResourcesToolError.invalidCharacterRange
+        }
+        let limit = min(characterLimit ?? maximumTextCharacters, maximumTextCharacters)
+        let start = loaded.text.index(loaded.text.startIndex, offsetBy: offset)
+        let end = loaded.text.index(start, offsetBy: limit, limitedBy: loaded.text.endIndex)
+            ?? loaded.text.endIndex
+        let text = String(loaded.text[start..<end])
+        let characterEnd = offset + text.count
+        let truncated = characterEnd < loaded.text.count
+        return .object([
+            "path": .string(url.path),
+            "kind": .string("text"),
+            "format": .string(loaded.format.rawValue),
+            "encoding": .string(loaded.encoding),
+            "text": .string(text),
+            "character_offset": .number(Double(offset)),
+            "character_end": .number(Double(characterEnd)),
+            "total_characters": .number(Double(loaded.text.count)),
+            "next_character_offset": truncated ? .number(Double(characterEnd)) : .null,
+            "recommended_action": truncated && offset == 0
+                ? .string("Use document_analysis for whole-document summary; continue read only for adjacent detail.")
+                : .null,
+            "truncated": .bool(truncated),
+            "size_bytes": .number(Double(loaded.sizeBytes))
+        ])
+    }
+
+    private func loadText(
+        _ url: URL,
+        format: LocalDocumentFormat? = nil
+    ) throws -> LoadedText {
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
         let fileSize = values.fileSize ?? 0
         guard fileSize <= maximumFileBytes else {
             throw LocalResourcesToolError.fileTooLarge(maximumFileBytes)
         }
-        let resolvedFormat = format ?? documentFormat(for: url)
+        let resolvedFormat = format ?? LocalDocumentFormat.detect(url: url)
         guard resolvedFormat.isText else {
             throw LocalResourcesToolError.unsupportedFileType(
                 values.contentType?.identifier ?? url.pathExtension.lowercased()
@@ -222,23 +325,23 @@ public actor LocalResourcesTool: LLMTool {
         guard data.count <= maximumFileBytes else {
             throw LocalResourcesToolError.fileTooLarge(maximumFileBytes)
         }
-        let text = String(decoding: data, as: UTF8.self)
-        let truncated = text.count > maximumTextCharacters
-        return .object([
-            "path": .string(url.path),
-            "kind": .string("text"),
-            "format": .string(resolvedFormat.rawValue),
-            "encoding": .string("utf-8"),
-            "text": .string(String(text.prefix(maximumTextCharacters))),
-            "truncated": .bool(truncated),
-            "size_bytes": .number(Double(data.count))
-        ])
+        guard let decoded = decodeText(data), isPlausibleText(decoded.text) else {
+            throw LocalResourcesToolError.unreadableTextEncoding
+        }
+        return LoadedText(
+            text: decoded.text,
+            encoding: decoded.encoding,
+            format: resolvedFormat,
+            sizeBytes: data.count
+        )
     }
 
     private func readPDF(
         _ url: URL,
         pageStart: Int?,
-        pageEnd: Int?
+        pageEnd: Int?,
+        pageOffset: Int?,
+        characterLimit: Int?
     ) throws -> JSONValue {
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         guard (values.fileSize ?? 0) <= maximumFileBytes else {
@@ -253,105 +356,182 @@ public actor LocalResourcesTool: LLMTool {
         let pageCount = document.pageCount
         let start = pageStart ?? 1
         let end = pageEnd ?? pageCount
-        guard pageCount > 0, start >= 1, end >= start, end <= pageCount else {
+        let firstPageOffset = pageOffset ?? 0
+        guard pageCount > 0, start >= 1, end >= start, end <= pageCount,
+              pageOffset == nil || pageStart != nil
+        else {
             throw LocalResourcesToolError.invalidPageRange
         }
 
         var pages: [JSONValue] = []
-        var remainingCharacters = maximumTextCharacters
+        var remainingCharacters = min(characterLimit ?? maximumTextCharacters, maximumTextCharacters)
         var truncated = false
+        var nextPage: Int?
+        var nextPageOffset: Int?
+        var hasExtractableText = false
         for pageNumber in start...end {
+            try Task.checkCancellation()
             guard remainingCharacters > 0 else {
                 truncated = true
+                nextPage = pageNumber
+                nextPageOffset = 0
                 break
             }
-            let text = document.page(at: pageNumber - 1)?.string ?? ""
-            let pageText = String(text.prefix(remainingCharacters))
+            let fullText = document.page(at: pageNumber - 1)?.string ?? ""
+            let offset = pageNumber == start ? firstPageOffset : 0
+            guard offset <= fullText.count else {
+                throw LocalResourcesToolError.invalidCharacterRange
+            }
+            let pageStartIndex = fullText.index(fullText.startIndex, offsetBy: offset)
+            let pageEndIndex = fullText.index(
+                pageStartIndex,
+                offsetBy: remainingCharacters,
+                limitedBy: fullText.endIndex
+            ) ?? fullText.endIndex
+            let pageText = String(fullText[pageStartIndex..<pageEndIndex])
+            hasExtractableText = hasExtractableText
+                || !pageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             pages.append(.object([
                 "page": .number(Double(pageNumber)),
+                "character_offset": .number(Double(offset)),
                 "text": .string(pageText)
             ]))
             remainingCharacters -= pageText.count
-            if pageText.count < text.count {
+            let consumedEnd = offset + pageText.count
+            if consumedEnd < fullText.count {
                 truncated = true
+                nextPage = pageNumber
+                nextPageOffset = consumedEnd
                 break
             }
+        }
+        guard hasExtractableText else {
+            throw LocalResourcesToolError.pdfHasNoExtractableText
         }
         return .object([
             "path": .string(url.path),
             "kind": .string("pdf"),
-            "format": .string(DocumentFormat.pdf.rawValue),
+            "format": .string(LocalDocumentFormat.pdf.rawValue),
             "page_count": .number(Double(pageCount)),
             "page_start": .number(Double(start)),
             "page_end": .number(Double(end)),
             "pages": .array(pages),
+            "next_page": nextPage.map { .number(Double($0)) } ?? .null,
+            "next_page_offset": nextPageOffset.map { .number(Double($0)) } ?? .null,
+            "recommended_action": truncated && start == 1 && firstPageOffset == 0
+                ? .string("Use document_analysis for whole-document summary; continue read only for adjacent detail.")
+                : .null,
             "truncated": .bool(truncated)
         ])
     }
 
-    private func searchDocument(_ url: URL, query: String, limit: Int) throws -> JSONValue {
-        let normalizedQuery = query.localizedLowercase
-        let matches: [JSONValue]
-        if documentFormat(for: url) == .pdf {
-            guard let document = PDFDocument(url: url), !document.isLocked else {
+    private func searchDocument(
+        _ url: URL,
+        query: String,
+        limit: Int,
+        pageStart: Int?,
+        pageEnd: Int?
+    ) throws -> JSONValue {
+        var matches: [JSONValue] = []
+        var truncated = false
+        var nextPage: Int?
+        if LocalDocumentFormat.detect(url: url) == .pdf {
+            guard let document = PDFDocument(url: url) else {
                 throw LocalResourcesToolError.unreadablePDF
             }
-            matches = document.pageCount == 0 ? [] : (0..<document.pageCount).compactMap { index in
-                guard let text = document.page(at: index)?.string,
-                      let context = matchContext(in: text, query: normalizedQuery)
+            guard !document.isLocked else {
+                throw LocalResourcesToolError.lockedPDF
+            }
+            let start = pageStart ?? 1
+            let requestedEnd = pageEnd ?? document.pageCount
+            guard document.pageCount > 0, start >= 1,
+                  requestedEnd >= start, requestedEnd <= document.pageCount
+            else {
+                throw LocalResourcesToolError.invalidPageRange
+            }
+            let scanEnd = min(requestedEnd, start + 499)
+            for pageNumber in start...scanEnd {
+                try Task.checkCancellation()
+                guard let text = document.page(at: pageNumber - 1)?.string,
+                        let context = matchContext(in: text, query: query)
                 else {
-                    return nil
+                    continue
                 }
-                return .object([
-                    "page": .number(Double(index + 1)),
+                if matches.count == limit {
+                    truncated = true
+                    nextPage = pageNumber
+                    break
+                }
+                matches.append(.object([
+                    "page": .number(Double(pageNumber)),
                     "context": .string(context)
-                ])
+                ]))
+            }
+            if nextPage == nil, scanEnd < requestedEnd {
+                truncated = true
+                nextPage = scanEnd + 1
             }
         } else {
-            let object = try readText(url).objectValue ?? [:]
-            let text = object["text"]?.stringValue ?? ""
-            matches = matchContext(in: text, query: normalizedQuery).map {
+            guard pageStart == nil, pageEnd == nil else {
+                throw LocalResourcesToolError.invalidPageRange
+            }
+            try Task.checkCancellation()
+            let text = try loadText(url).text
+            matches = matchContext(in: text, query: query).map {
                 [.object(["context": .string($0)])]
             } ?? []
         }
         return .object([
             "path": .string(url.path),
             "query": .string(query),
-            "matches": .array(Array(matches.prefix(limit))),
-            "truncated": .bool(matches.count > limit)
+            "matches": .array(matches),
+            "next_page": nextPage.map { .number(Double($0)) } ?? .null,
+            "truncated": .bool(truncated)
         ])
     }
 
     private func matchContext(in text: String, query: String) -> String? {
-        let normalizedText = text.localizedLowercase
-        guard let range = normalizedText.range(of: query) else {
+        guard let range = text.range(
+            of: query,
+            options: [.caseInsensitive],
+            locale: .current
+        ) else {
             return nil
         }
-        let lower = normalizedText.index(range.lowerBound, offsetBy: -120, limitedBy: normalizedText.startIndex)
-            ?? normalizedText.startIndex
-        let upper = normalizedText.index(range.upperBound, offsetBy: 240, limitedBy: normalizedText.endIndex)
-            ?? normalizedText.endIndex
+        let lower = text.index(range.lowerBound, offsetBy: -120, limitedBy: text.startIndex)
+            ?? text.startIndex
+        let upper = text.index(range.upperBound, offsetBy: 240, limitedBy: text.endIndex)
+            ?? text.endIndex
         return String(text[lower..<upper]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func documentFormat(for url: URL) -> DocumentFormat {
-        let fileExtension = url.pathExtension.lowercased()
-        if let format = DocumentFormat.extensions[fileExtension] {
-            return format
-        }
-        if let type = UTType(filenameExtension: fileExtension) {
-            if type.conforms(to: .pdf) { return .pdf }
-            if type.conforms(to: .html) { return .html }
-            if type.conforms(to: .json) { return .json }
-            if type.conforms(to: .plainText) || type.conforms(to: .sourceCode) {
-                return .plainText
+    private func decodeText(_ data: Data) -> (text: String, encoding: String)? {
+        let encodings: [(String.Encoding, String)] = [
+            (.utf8, "utf-8"),
+            (.utf16, "utf-16"),
+            (.utf16LittleEndian, "utf-16le"),
+            (.utf16BigEndian, "utf-16be"),
+            (.windowsCP1252, "windows-1252"),
+            (.isoLatin1, "iso-8859-1")
+        ]
+        for (encoding, name) in encodings {
+            if let text = String(data: data, encoding: encoding) {
+                return (text, name)
             }
         }
-        if fileExtension.isEmpty {
-            return .plainText
-        }
-        return .unsupported
+        return nil
     }
+
+    private func isPlausibleText(_ text: String) -> Bool {
+        guard !text.isEmpty else { return true }
+        let suspicious = text.unicodeScalars.reduce(into: 0) { count, scalar in
+            if scalar.value == 0 || (scalar.value < 0x20 && !"\n\r\t".unicodeScalars.contains(scalar)) {
+                count += 1
+            }
+        }
+        return suspicious * 100 <= text.unicodeScalars.count
+    }
+
 }
 
 private struct AuthorizedResource {
@@ -359,60 +539,9 @@ private struct AuthorizedResource {
     let root: URL
 }
 
-private enum DocumentFormat: String {
-    case pdf
-    case markdown
-    case plainText = "plain_text"
-    case json
-    case csv
-    case xml
-    case html
-    case yaml
-    case sourceCode = "source_code"
-    case unsupported
-
-    var isText: Bool {
-        self != .pdf && self != .unsupported
-    }
-
-    static let extensions: [String: DocumentFormat] = [
-        "pdf": .pdf,
-        "md": .markdown,
-        "markdown": .markdown,
-        "txt": .plainText,
-        "text": .plainText,
-        "log": .plainText,
-        "json": .json,
-        "jsonl": .json,
-        "csv": .csv,
-        "tsv": .csv,
-        "xml": .xml,
-        "html": .html,
-        "htm": .html,
-        "yaml": .yaml,
-        "yml": .yaml,
-        "toml": .plainText,
-        "ini": .plainText,
-        "swift": .sourceCode,
-        "m": .sourceCode,
-        "mm": .sourceCode,
-        "h": .sourceCode,
-        "c": .sourceCode,
-        "cc": .sourceCode,
-        "cpp": .sourceCode,
-        "js": .sourceCode,
-        "jsx": .sourceCode,
-        "ts": .sourceCode,
-        "tsx": .sourceCode,
-        "py": .sourceCode,
-        "rb": .sourceCode,
-        "go": .sourceCode,
-        "rs": .sourceCode,
-        "java": .sourceCode,
-        "kt": .sourceCode,
-        "kts": .sourceCode,
-        "sh": .sourceCode,
-        "zsh": .sourceCode,
-        "sql": .sourceCode
-    ]
+private struct LoadedText {
+    let text: String
+    let encoding: String
+    let format: LocalDocumentFormat
+    let sizeBytes: Int
 }

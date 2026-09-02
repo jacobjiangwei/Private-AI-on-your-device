@@ -25,6 +25,57 @@ final class ConversationDatabase {
         return conversation
     }
 
+    func appendUserTurn(
+        to conversation: ConversationRecord,
+        prompt: String,
+        attachments: [ImportedArtifact]
+    ) throws -> (user: MessageRecord, assistant: MessageRecord) {
+        do {
+            let firstSequence = (conversation.messages.map(\.sequence).max() ?? 0) + 1
+            let user = MessageRecord(
+                sequence: firstSequence,
+                role: .user,
+                content: prompt,
+                status: .complete,
+                conversation: conversation
+            )
+            context.insert(user)
+            conversation.messages.append(user)
+
+            for (sortOrder, imported) in attachments.enumerated() {
+                let blob = try artifactBlob(for: imported)
+                let reference = ConversationArtifactRecord(
+                    displayName: imported.displayName,
+                    sortOrder: sortOrder,
+                    message: user,
+                    blob: blob
+                )
+                context.insert(reference)
+                user.attachments.append(reference)
+                blob.references.append(reference)
+            }
+
+            let assistant = MessageRecord(
+                sequence: firstSequence + 1,
+                role: .assistant,
+                content: "",
+                status: .streaming,
+                conversation: conversation
+            )
+            context.insert(assistant)
+            conversation.messages.append(assistant)
+            conversation.updatedAt = .now
+            if conversation.title == "New conversation" {
+                conversation.title = String(prompt.prefix(48))
+            }
+            try context.save()
+            return (user, assistant)
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
     @discardableResult
     func appendMessage(
         to conversation: ConversationRecord,
@@ -90,5 +141,55 @@ final class ConversationDatabase {
             message.errorMessage = "The previous response was interrupted."
         }
         try context.save()
+    }
+
+    func sanitizeLegacyLocalResourceMessages() throws {
+        let descriptor = FetchDescriptor<MessageRecord>(
+            predicate: #Predicate { $0.toolName == "local_resources" }
+        )
+        var changed = false
+        for message in try context.fetch(descriptor) {
+            let safeMarker = "Document content was available to the model for this run"
+            guard !message.content.contains(safeMarker) else { continue }
+            message.content = "Legacy local document Tool details were removed during the privacy upgrade."
+            changed = true
+        }
+        if changed {
+            try context.save()
+        }
+    }
+
+    func referencedArtifactPaths() throws -> Set<String> {
+        let references = try context.fetch(FetchDescriptor<ConversationArtifactRecord>())
+        return Set(references.compactMap { $0.blob?.relativePath })
+    }
+
+    func removeUnreferencedArtifactBlobs() throws {
+        let blobs = try context.fetch(FetchDescriptor<ArtifactBlobRecord>())
+        for blob in blobs where blob.references.isEmpty {
+            context.delete(blob)
+        }
+        try context.save()
+    }
+
+    private func artifactBlob(for imported: ImportedArtifact) throws -> ArtifactBlobRecord {
+        let storageKey = imported.storageKey
+        var descriptor = FetchDescriptor<ArtifactBlobRecord>(
+            predicate: #Predicate { $0.storageKey == storageKey }
+        )
+        descriptor.fetchLimit = 1
+        if let existing = try context.fetch(descriptor).first {
+            return existing
+        }
+        let blob = ArtifactBlobRecord(
+            storageKey: imported.storageKey,
+            contentHash: imported.contentHash,
+            relativePath: imported.relativePath,
+            format: imported.format,
+            contentTypeIdentifier: imported.contentTypeIdentifier,
+            byteCount: imported.byteCount
+        )
+        context.insert(blob)
+        return blob
     }
 }

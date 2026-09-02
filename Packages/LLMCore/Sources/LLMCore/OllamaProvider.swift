@@ -27,7 +27,7 @@ public enum OllamaProviderError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
-public actor OllamaProvider: ModelProvider {
+public actor OllamaProvider: ModelProvider, ModelIdentityProviding {
     private let baseURL: URL
     private let session: URLSession
     private let encoder: JSONEncoder
@@ -102,6 +102,20 @@ public actor OllamaProvider: ModelProvider {
         if let error = result.error {
             throw OllamaProviderError.provider(error)
         }
+    }
+
+    public func immutableModelIdentity(for model: String) async throws -> String {
+        var request = URLRequest(url: baseURL.appending(path: "api/tags"))
+        request.httpMethod = "GET"
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        let tags = try decoder.decode(OllamaTagsResponse.self, from: data)
+        guard let digest = tags.models.first(where: {
+            $0.name == model || $0.model == model
+        })?.digest, !digest.isEmpty else {
+            throw OllamaProviderError.provider("The immutable digest for model '\(model)' is unavailable.")
+        }
+        return digest
     }
 
     public func stream(
@@ -232,7 +246,17 @@ private struct OllamaWarmupResponse: Decodable {
     }
 }
 
-private struct OllamaChatChunk: Decodable {
+private struct OllamaTagsResponse: Decodable {
+    let models: [OllamaTag]
+}
+
+private struct OllamaTag: Decodable {
+    let name: String
+    let model: String
+    let digest: String
+}
+
+struct OllamaChatChunk: Decodable {
     let message: ChatMessage?
     let done: Bool
     let error: String?
@@ -242,6 +266,7 @@ private struct OllamaChatChunk: Decodable {
     let promptEvalDuration: UInt64?
     let evalCount: Int?
     let evalDuration: UInt64?
+    let doneReason: String?
 
     var usage: ModelUsage {
         ModelUsage(
@@ -250,7 +275,8 @@ private struct OllamaChatChunk: Decodable {
             promptTokenCount: promptEvalCount,
             promptDurationNanoseconds: promptEvalDuration,
             outputTokenCount: evalCount,
-            outputDurationNanoseconds: evalDuration
+            outputDurationNanoseconds: evalDuration,
+            finishReason: doneReason
         )
     }
 
@@ -264,6 +290,7 @@ private struct OllamaChatChunk: Decodable {
         case promptEvalDuration = "prompt_eval_duration"
         case evalCount = "eval_count"
         case evalDuration = "eval_duration"
+        case doneReason = "done_reason"
     }
 }
 

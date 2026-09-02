@@ -20,11 +20,14 @@ struct LocalResourcesToolTests {
         #expect(description.contains("source code"))
         #expect(description.contains("PDF"))
         #expect(!description.contains("PDFKit"))
+        #expect(schema.objectValue?["properties"]?.objectValue?["path"]?.objectValue?["description"]?.stringValue?.contains("relative") == true)
         #expect(schema.objectValue?["properties"]?.objectValue?["action"]?.objectValue?["enum"] == .array([
             .string("list"),
             .string("read"),
             .string("search")
         ]))
+        #expect(schema.objectValue?["properties"]?.objectValue?["character_offset"] != nil)
+        #expect(schema.objectValue?["properties"]?.objectValue?["page_offset"] != nil)
     }
 
     @Test("lists and reads real files inside an authorized root")
@@ -50,6 +53,87 @@ struct LocalResourcesToolTests {
             ])
             #expect(document["kind"] == .string("text"))
             #expect(document["text"]?.stringValue == "PrivateAI local resource content")
+        }
+    }
+
+    @Test("continues bounded text reads without losing content")
+    func boundedTextContinuation() async throws {
+        try await withFixtureDirectory { root in
+            let textURL = root.appending(path: "bounded.txt")
+            try "ABCDEFGHIJK".write(to: textURL, atomically: true, encoding: .utf8)
+            let tool = LocalResourcesTool(
+                access: .restricted([root]),
+                maximumTextCharacters: 5
+            )
+
+            let first = try await executeObject(tool, arguments: [
+                "action": .string("read"),
+                "path": .string(textURL.path)
+            ])
+            #expect(first["text"] == .string("ABCDE"))
+            #expect(first["next_character_offset"] == .number(5))
+            #expect(first["truncated"] == .bool(true))
+
+            let second = try await executeObject(tool, arguments: [
+                "action": .string("read"),
+                "path": .string(textURL.path),
+                "character_offset": .number(5)
+            ])
+            #expect(second["text"] == .string("FGHIJ"))
+            #expect(second["next_character_offset"] == .number(10))
+        }
+    }
+
+    @Test("keeps multibyte text as valid resumable JSON through ToolRuntime")
+    func multibyteTextThroughRuntime() async throws {
+        try await withFixtureDirectory { root in
+            let textURL = root.appending(path: "multibyte.txt")
+            try String(repeating: "文😀\n", count: 2_000)
+                .write(to: textURL, atomically: true, encoding: .utf8)
+            let runtime = try ToolRuntime(tools: [
+                LocalResourcesTool(
+                    access: .restricted([root]),
+                    maximumTextCharacters: 2_000
+                )
+            ])
+            let call = ToolCall(function: ToolFunctionCall(
+                index: 0,
+                name: "local_resources",
+                arguments: [
+                    "action": .string("read"),
+                    "path": .string(textURL.path)
+                ]
+            ))
+
+            let execution = await runtime.execute(call)
+            let value = try JSONDecoder().decode(
+                JSONValue.self,
+                from: Data(execution.content.utf8)
+            )
+            let document = try #require(value.objectValue)
+
+            #expect(execution.succeeded)
+            #expect(execution.content.utf8.count < 16 * 1_024)
+            #expect(document["text"]?.stringValue?.count == 2_000)
+            #expect(document["next_character_offset"] == .number(2_000))
+            #expect(document["truncated"] == .bool(true))
+        }
+    }
+
+    @Test("decodes UTF-16 text without replacement characters")
+    func utf16Text() async throws {
+        try await withFixtureDirectory { root in
+            let textURL = root.appending(path: "utf16.txt")
+            try #require("PrivateAI 文档".data(using: .utf16)).write(to: textURL)
+            let tool = LocalResourcesTool(access: .restricted([root]))
+
+            let document = try await executeObject(tool, arguments: [
+                "action": .string("read"),
+                "path": .string(textURL.path)
+            ])
+
+            #expect(document["text"] == .string("PrivateAI 文档"))
+            #expect(document["encoding"] == .string("utf-16"))
         }
     }
 
@@ -81,6 +165,58 @@ struct LocalResourcesToolTests {
             #expect(pages.count == 2)
             #expect(pages[0].objectValue?["text"]?.stringValue?.contains("PDFKit page one") == true)
             #expect(pages[1].objectValue?["text"]?.stringValue?.contains("architecture details") == true)
+        }
+    }
+
+    @Test("continues a bounded PDF read within a page")
+    func boundedPDFContinuation() async throws {
+        try await withFixtureDirectory { root in
+            let pdfURL = root.appending(path: "bounded.pdf")
+            try createTextPDF(at: pdfURL, pages: ["ABCDEFGHIJK"])
+            let tool = LocalResourcesTool(
+                access: .restricted([root]),
+                maximumTextCharacters: 5
+            )
+
+            let first = try await executeObject(tool, arguments: [
+                "action": .string("read"),
+                "path": .string(pdfURL.path),
+                "page_start": .number(1),
+                "page_end": .number(1)
+            ])
+            #expect(first["next_page"] == .number(1))
+            #expect(first["next_page_offset"] == .number(5))
+            #expect(first["truncated"] == .bool(true))
+
+            let second = try await executeObject(tool, arguments: [
+                "action": .string("read"),
+                "path": .string(pdfURL.path),
+                "page_start": .number(1),
+                "page_end": .number(1),
+                "page_offset": .number(5)
+            ])
+            guard case .array(let pages) = second["pages"] else {
+                Issue.record("Continued PDF result did not contain pages")
+                return
+            }
+            #expect(pages.first?.objectValue?["character_offset"] == .number(5))
+            #expect(pages.first?.objectValue?["text"]?.stringValue?.hasPrefix("FGHIJ") == true)
+        }
+    }
+
+    @Test("reports a PDF without an extractable text layer")
+    func imageOnlyPDF() async throws {
+        try await withFixtureDirectory { root in
+            let pdfURL = root.appending(path: "image-only.pdf")
+            try createTextPDF(at: pdfURL, pages: [""])
+            let tool = LocalResourcesTool(access: .restricted([root]))
+
+            await #expect(throws: LocalResourcesToolError.pdfHasNoExtractableText) {
+                try await tool.execute(arguments: [
+                    "action": .string("read"),
+                    "path": .string(pdfURL.path)
+                ])
+            }
         }
     }
 
@@ -200,6 +336,66 @@ struct LocalResourcesToolTests {
         }
     }
 
+    @Test("continues PDF search after the match limit")
+    func boundedPDFSearch() async throws {
+        try await withFixtureDirectory { root in
+            let pdfURL = root.appending(path: "bounded-search.pdf")
+            try createTextPDF(
+                at: pdfURL,
+                pages: ["needle one", "needle two", "needle three"]
+            )
+            let tool = LocalResourcesTool(access: .restricted([root]))
+
+            let first = try await executeObject(tool, arguments: [
+                "action": .string("search"),
+                "path": .string(pdfURL.path),
+                "query": .string("needle"),
+                "limit": .number(1)
+            ])
+            #expect(first["truncated"] == .bool(true))
+            #expect(first["next_page"] == .number(2))
+
+            let second = try await executeObject(tool, arguments: [
+                "action": .string("search"),
+                "path": .string(pdfURL.path),
+                "query": .string("needle"),
+                "limit": .number(1),
+                "page_start": .number(2)
+            ])
+            guard case .array(let matches) = second["matches"] else {
+                Issue.record("Continued PDF search did not contain matches")
+                return
+            }
+            #expect(matches.first?.objectValue?["page"] == .number(2))
+            #expect(second["next_page"] == .number(3))
+        }
+    }
+
+    @Test("search handles Unicode case expansion without invalid indices")
+    func unicodeCaseExpansionSearch() async throws {
+        try await withFixtureDirectory { root in
+            let textURL = root.appending(path: "unicode.txt")
+            try "Before İSTANBUL after".write(
+                to: textURL,
+                atomically: true,
+                encoding: .utf8
+            )
+            let tool = LocalResourcesTool(access: .restricted([root]))
+
+            let result = try await executeObject(tool, arguments: [
+                "action": .string("search"),
+                "path": .string(textURL.path),
+                "query": .string("İ")
+            ])
+            guard case .array(let matches) = result["matches"] else {
+                Issue.record("Unicode search did not contain matches")
+                return
+            }
+
+            #expect(matches.first?.objectValue?["context"]?.stringValue == "Before İSTANBUL after")
+        }
+    }
+
     @Test("rejects paths and symlinks outside authorized roots")
     func rejectsEscapes() async throws {
         try await withFixtureDirectory { root in
@@ -218,6 +414,22 @@ struct LocalResourcesToolTests {
                     "path": .string(symlink.path)
                 ])
             }
+        }
+    }
+
+    @Test("an explicit empty restricted scope denies all paths")
+    func emptyRestrictedScope() async throws {
+        let outside = FileManager.default.temporaryDirectory
+            .appending(path: "restricted-\(UUID().uuidString).txt")
+        try "outside".write(to: outside, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        let tool = LocalResourcesTool(access: .restricted([]))
+
+        await #expect(throws: LocalResourcesToolError.outsideAuthorizedRoots(outside.path)) {
+            try await tool.execute(arguments: [
+                "action": .string("read"),
+                "path": .string(outside.path)
+            ])
         }
     }
 
@@ -274,13 +486,11 @@ struct LocalResourcesToolTests {
                     + "total=\(result.performance.totalSeconds)s"
             )
 
-            #expect(calls.count == 1)
-            #expect(calls.first?.function.name == "local_resources")
-            #expect(calls.first?.function.arguments["action"] == .string("read"))
-            #expect(toolMessages.count == 1)
-            #expect(toolMessages.first?.content.contains("ORCHID-42") == true)
+            #expect(!calls.isEmpty)
+            #expect(calls.allSatisfy { $0.function.name == "local_resources" })
+            #expect(toolMessages.contains { $0.content.contains("ORCHID-42") })
             #expect(result.text.contains("ORCHID-42"))
-            #expect(result.performance.modelRequestCount == 2)
+            #expect(result.performance.modelRequestCount >= 2)
         }
     }
 }

@@ -171,6 +171,81 @@ struct AgentRuntimeTests {
         #expect(await tool.executionCount == 0)
     }
 
+    @Test("finalizes instead of failing after exhausting the total tool budget")
+    func finalizesAfterToolBudgetExhaustion() async throws {
+        let calls = (0..<9).map { offset in
+            ToolCall(function: ToolFunctionCall(
+                name: "document_reader",
+                arguments: ["offset": .number(Double(offset * 2_000))]
+            ))
+        }
+        let provider = ScriptedProvider(responses:
+            calls.map { [.toolCalls([$0]), .completed(ModelUsage())] }
+                + [[.text("Bounded summary from eight chunks."), .completed(ModelUsage())]]
+        )
+        let tool = RecordingDocumentTool()
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(
+                model: "fixture",
+                maximumToolRounds: 12,
+                maximumToolCallsPerRound: 4,
+                maximumToolCallsTotal: 8,
+                automaticallyWarmsUp: false
+            )
+        )
+
+        let result = try await runtime.run(prompt: "Summarize the large document")
+        let requests = await provider.recordedRequests
+
+        #expect(result.text == "Bounded summary from eight chunks.")
+        #expect(result.performance.toolCallCount == 8)
+        #expect(await tool.executionCount == 8)
+        #expect(requests.count == 10)
+        #expect(requests[8].tools.isEmpty)
+        #expect(requests[9].tools.isEmpty)
+        #expect(requests[9].messages.contains {
+            $0.role == .user
+                && $0.content.contains("Summarize the large document")
+                && $0.content.contains("tool-call budget")
+        })
+    }
+
+    @Test("corrects an oversized hallucinated batch during tool-free finalization")
+    func correctsOversizedFinalizationBatch() async throws {
+        let firstCall = ToolCall(function: ToolFunctionCall(name: "document_reader", arguments: [:]))
+        let hallucinated = (0..<5).map { index in
+            ToolCall(function: ToolFunctionCall(
+                name: "document_reader",
+                arguments: ["offset": .number(Double(index))]
+            ))
+        }
+        let provider = ScriptedProvider(responses: [
+            [.toolCalls([firstCall]), .completed(ModelUsage())],
+            [.toolCalls(hallucinated), .completed(ModelUsage())],
+            [.text("Final answer from gathered evidence."), .completed(ModelUsage())]
+        ])
+        let tool = RecordingDocumentTool()
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(
+                model: "fixture",
+                maximumToolRounds: 4,
+                maximumToolCallsPerRound: 4,
+                maximumToolCallsTotal: 1,
+                automaticallyWarmsUp: false
+            )
+        )
+
+        let result = try await runtime.run(prompt: "Summarize")
+
+        #expect(result.text == "Final answer from gathered evidence.")
+        #expect(await tool.executionCount == 1)
+        #expect(result.performance.toolCallCount == 1)
+    }
+
     @Test("executes tool calls from one model response concurrently")
     func executesParallelToolBatch() async throws {
         let calls = [
@@ -271,6 +346,22 @@ private actor RecordingTool: LLMTool {
     func execute(arguments: [String: JSONValue]) async throws -> String {
         executionCount += 1
         return "{}"
+    }
+}
+
+private actor RecordingDocumentTool: LLMTool {
+    nonisolated let definition = ToolDefinition(
+        function: ToolFunctionDefinition(
+            name: "document_reader",
+            description: "Reads one bounded document chunk for regression testing.",
+            parameters: .object(["type": .string("object")])
+        )
+    )
+    private(set) var executionCount = 0
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        executionCount += 1
+        return "chunk \(executionCount)"
     }
 }
 

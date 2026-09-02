@@ -2,13 +2,23 @@
 
 ## Current status
 
-PrivateAI is being rebuilt from a minimal macOS application scaffold. There is currently no supported AI chat workflow, downloadable release, or end-user troubleshooting contract.
+PrivateAI is an actively developed native macOS assistant. Signed and notarized development releases are available from GitHub Releases.
 
-The current source build does not require Ollama and does not yet provide conversations, model selection, Markdown rendering, documents, memories, tools, or product network features. Those capabilities are target requirements, not current user-facing behavior.
+The App requires a local Ollama installation and compatible chat model. It provides persistent conversations, model selection, Markdown rendering, built-in Tools, and managed document attachments. Searchable PDFs and text formats support bounded detail reads; whole-document work uses resumable hierarchical summaries stored locally.
+
+## Document analysis
+
+Attach a supported document with the paperclip button or Finder drag and drop, then ask for a summary or analysis. Long jobs save private checkpoints under `~/.privateAI/jobs/document-summaries`; stopping and repeating the same document, goal, and model resumes completed work. Scanned PDFs without an extractable text layer are not currently supported.
+
+If document analysis fails, include the error message and App version in a private report. Do not attach the document to a public issue.
 
 ## Development build
 
 Open `Private AI/Private AI.xcodeproj` in a compatible Xcode version and build the `Private AI` target. The deployment target and SDK requirements are currently defined by the Xcode project and may change during the rebuild.
+
+## Downloaded release
+
+Download `PrivateAI.dmg` and `PrivateAI.dmg.sha256` from the same GitHub Release. Verify the checksum before opening the DMG. Releases are signed with Developer ID, notarized by Apple, and assessed by Gatekeeper in CI before publication.
 
 ## Contact
 

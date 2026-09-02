@@ -194,6 +194,7 @@ public struct ModelUsage: Codable, Equatable, Sendable {
     public let promptDurationNanoseconds: UInt64?
     public let outputTokenCount: Int?
     public let outputDurationNanoseconds: UInt64?
+    public let finishReason: String?
 
     public init(
         totalDurationNanoseconds: UInt64? = nil,
@@ -201,7 +202,8 @@ public struct ModelUsage: Codable, Equatable, Sendable {
         promptTokenCount: Int? = nil,
         promptDurationNanoseconds: UInt64? = nil,
         outputTokenCount: Int? = nil,
-        outputDurationNanoseconds: UInt64? = nil
+        outputDurationNanoseconds: UInt64? = nil,
+        finishReason: String? = nil
     ) {
         self.totalDurationNanoseconds = totalDurationNanoseconds
         self.loadDurationNanoseconds = loadDurationNanoseconds
@@ -209,6 +211,7 @@ public struct ModelUsage: Codable, Equatable, Sendable {
         self.promptDurationNanoseconds = promptDurationNanoseconds
         self.outputTokenCount = outputTokenCount
         self.outputDurationNanoseconds = outputDurationNanoseconds
+        self.finishReason = finishReason
     }
 }
 
@@ -241,4 +244,8 @@ public struct WarmupMetrics: Equatable, Sendable {
 public protocol ModelProvider: Sendable {
     func warmUp(model: String, keepAlive: String, options: ModelOptions) async throws -> WarmupMetrics
     func stream(_ request: ModelRequest) async throws -> AsyncThrowingStream<ModelStreamEvent, any Error>
+}
+
+public protocol ModelIdentityProviding: Sendable {
+    func immutableModelIdentity(for model: String) async throws -> String
 }

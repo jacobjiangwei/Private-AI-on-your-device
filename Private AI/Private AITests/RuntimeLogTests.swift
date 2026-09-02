@@ -48,6 +48,9 @@ struct RuntimeLogTests {
         #expect(firstData["access_token"] as? String == "[REDACTED]")
         #expect(!String(data: try Data(contentsOf: runFileURL), encoding: .utf8)!.contains("do-not-log"))
         #expect(try Data(contentsOf: fileURL).isEmpty)
+        #expect(try permissions(at: root) == 0o700)
+        #expect(try permissions(at: runFileURL) == 0o600)
+        #expect(try permissions(at: fileURL) == 0o600)
     }
 
     @Test("writes each run to a separate file")
@@ -69,5 +72,36 @@ struct RuntimeLogTests {
         #expect(FileManager.default.fileExists(atPath: secondFile.path))
         #expect(try String(contentsOf: firstFile, encoding: .utf8).contains(firstRun.uuidString))
         #expect(try String(contentsOf: secondFile, encoding: .utf8).contains(secondRun.uuidString))
+    }
+
+    @Test("purges legacy content-bearing logs once")
+    func privacyMigration() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let logs = root.appending(path: "logs", directoryHint: .isDirectory)
+        let state = root.appending(path: "state", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try "PRIVATE-DOCUMENT-SENTINEL".write(
+            to: logs.appending(path: "app.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try RuntimeLog.preparePrivacyMigration(
+            logsDirectory: logs,
+            stateDirectory: state
+        )
+
+        #expect(try FileManager.default.contentsOfDirectory(atPath: logs.path).isEmpty)
+        #expect(FileManager.default.fileExists(
+            atPath: state.appending(path: "runtime-log-privacy-v1").path
+        ))
+        #expect(try permissions(at: logs) == 0o700)
+    }
+
+    private func permissions(at url: URL) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes[.posixPermissions] as? NSNumber)?.intValue ?? -1
     }
 }

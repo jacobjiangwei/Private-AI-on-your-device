@@ -40,12 +40,13 @@ final class Private_AIUITests: XCTestCase {
         let transparencyPanel = app.descendants(matching: .any)["model.transparency.panel"]
         XCTAssertTrue(transparencyPanel.waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["System prompt"].exists)
-        XCTAssertTrue(app.staticTexts["Version 2"].exists)
+        XCTAssertTrue(app.staticTexts["Version 4"].exists)
 
         app.typeKey(.escape, modifierFlags: [])
         app.buttons["conversation.new.button"].click()
         let composer = app.textFields["chat.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["chat.attachment.button"].exists)
         // TODO: Assert focus through an App-owned test probe; never inject keyboard input.
     }
 

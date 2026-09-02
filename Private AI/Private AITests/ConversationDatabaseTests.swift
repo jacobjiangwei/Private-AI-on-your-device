@@ -1,3 +1,6 @@
+import Foundation
+import LLMCore
+import PrivateAITools
 import SwiftData
 import Testing
 @testable import Private_AI
@@ -86,11 +89,126 @@ struct ConversationDatabaseTests {
         #expect(ordered[3].id == assistant.id)
     }
 
+    @Test("persists an attached user turn atomically and reuses artifact blobs")
+    func attachedUserTurn() throws {
+        let database = try makeDatabase()
+        let conversation = try database.createConversation(modelName: "fixture")
+        let imported = ImportedArtifact(
+            displayName: "Report.md",
+            storageKey: "abc.md",
+            contentHash: "abc",
+            relativePath: "blobs/ab/abc/content.md",
+            format: .markdown,
+            contentTypeIdentifier: "net.daringfireball.markdown",
+            byteCount: 42
+        )
+
+        let first = try database.appendUserTurn(
+            to: conversation,
+            prompt: "Summarize this",
+            attachments: [imported]
+        )
+        let second = try database.appendUserTurn(
+            to: conversation,
+            prompt: "Check it again",
+            attachments: [imported]
+        )
+
+        #expect(first.user.content == "Summarize this")
+        #expect(first.user.attachments.count == 1)
+        #expect(first.user.attachments.first?.displayName == "Report.md")
+        #expect(first.user.attachments.first?.sortOrder == 0)
+        #expect(first.user.attachments.first?.blob?.relativePath == imported.relativePath)
+        #expect(first.assistant.sequence == first.user.sequence + 1)
+        #expect(first.assistant.status == .streaming)
+        #expect(second.user.attachments.first?.blob === first.user.attachments.first?.blob)
+
+        let modelContent = AttachmentModelContentBuilder.content(for: first.user)
+        #expect(modelContent.contains("privateai.document_attachments"))
+        #expect(modelContent.contains("blobs/ab/abc/content.md"))
+        #expect(modelContent.contains("Summarize this"))
+        #expect(!modelContent.contains(FileManager.default.homeDirectoryForCurrentUser.path))
+    }
+
+    @Test("local document tool transcript omits document paths, queries, and content")
+    func privateDocumentToolTranscript() {
+        let sentinel = "PRIVATE-DOCUMENT-SENTINEL"
+        let arguments: [String: JSONValue] = [
+            "action": .string("search"),
+            "path": .string("/Users/private/report.pdf"),
+            "query": .string(sentinel)
+        ]
+        let started = ToolTranscriptContent.started(
+            name: "local_resources",
+            arguments: arguments
+        )
+        let finished = ToolTranscriptContent.finished(ToolExecution(
+            name: "local_resources",
+            arguments: arguments,
+            content: "{\"text\":\"\(sentinel)\"}",
+            succeeded: true
+        ))
+
+        #expect(started.contains("search"))
+        #expect(!started.contains("/Users/private"))
+        #expect(!started.contains(sentinel))
+        #expect(!finished.contains("/Users/private"))
+        #expect(!finished.contains(sentinel))
+
+        let invalid = ToolTranscriptContent.started(
+            name: "local_resources",
+            arguments: ["action": .string(sentinel)]
+        )
+        #expect(!invalid.contains(sentinel))
+
+        let forgedArguments = ["query": JSONValue.string(sentinel)]
+        let forgedStarted = ToolTranscriptContent.started(
+            name: "web",
+            arguments: forgedArguments,
+            documentPrivacyMode: true
+        )
+        let forgedFinished = ToolTranscriptContent.finished(ToolExecution(
+            name: "web",
+            arguments: forgedArguments,
+            content: sentinel,
+            succeeded: false
+        ), documentPrivacyMode: true)
+        #expect(!forgedStarted.contains(sentinel))
+        #expect(!forgedFinished.contains(sentinel))
+    }
+
+    @Test("deleting a conversation leaves its artifact blob eligible for cleanup")
+    func deletionReleasesBlobReference() throws {
+        let database = try makeDatabase()
+        let conversation = try database.createConversation(modelName: "fixture")
+        let imported = ImportedArtifact(
+            displayName: "notes.txt",
+            storageKey: "delete.txt",
+            contentHash: "delete",
+            relativePath: "blobs/de/delete/content.txt",
+            format: .plainText,
+            contentTypeIdentifier: "public.plain-text",
+            byteCount: 12
+        )
+        _ = try database.appendUserTurn(
+            to: conversation,
+            prompt: "Read it",
+            attachments: [imported]
+        )
+
+        try database.delete(conversation)
+        try database.removeUnreferencedArtifactBlobs()
+
+        #expect(try database.referencedArtifactPaths().isEmpty)
+    }
+
     private func makeDatabase() throws -> ConversationDatabase {
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: ConversationRecord.self,
             MessageRecord.self,
+            ArtifactBlobRecord.self,
+            ConversationArtifactRecord.self,
             configurations: configuration
         )
         return ConversationDatabase(container: container)

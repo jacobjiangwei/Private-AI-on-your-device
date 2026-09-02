@@ -54,7 +54,17 @@ struct TranscriptWebView: NSViewRepresentable {
                     "content": $0.content,
                     "status": $0.status.rawValue,
                     "error": $0.errorMessage ?? "",
-                    "tool": $0.toolName ?? ""
+                "tool": $0.toolName ?? "",
+                "attachments": $0.attachments
+                  .sorted { $0.sortOrder < $1.sortOrder }
+                  .compactMap { attachment -> [String: Any]? in
+                    guard let blob = attachment.blob else { return nil }
+                    return [
+                      "name": attachment.displayName,
+                      "format": blob.formatRawValue,
+                      "size": blob.byteCount
+                    ]
+                  }
                 ]
             }
             Task { @MainActor in
@@ -95,6 +105,8 @@ struct TranscriptWebView: NSViewRepresentable {
         #messages { max-width: 860px; margin: 0 auto; padding: 24px 28px 48px; }
         article { position: relative; margin: 0 0 22px; padding-right: 34px; }
         article.user { margin-left: 18%; padding: 12px 42px 12px 14px; background: color-mix(in srgb, AccentColor 14%, Canvas); border-radius: 8px; }
+        .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .attachment { min-width: 0; max-width: 100%; padding: 5px 8px; border: 1px solid color-mix(in srgb, GrayText 30%, transparent); border-radius: 6px; color: GrayText; font-size: 11px; overflow-wrap: anywhere; }
         article.tool { border: 1px solid color-mix(in srgb, GrayText 28%, transparent); border-left: 3px solid GrayText; padding: 12px 42px 12px 14px; border-radius: 6px; color: GrayText; font-size: 12px; }
         article.tool .content { font-family: ui-monospace, monospace; line-height: 1.45; }
         article.tool .content p { margin: .35em 0; }
@@ -215,6 +227,12 @@ struct TranscriptWebView: NSViewRepresentable {
           if (inCode) { html += '<pre><code>' + escapeHTML(code.join('\n')) + '</code></pre>'; }
           flush(); return html;
         }
+        function byteCount(value) {
+          const bytes = Number(value) || 0;
+          if (bytes < 1024) return `${bytes} B`;
+          if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+          return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        }
         function render(messages) {
           const root = document.getElementById('messages');
           root.replaceChildren(...messages.map(message => {
@@ -239,6 +257,17 @@ struct TranscriptWebView: NSViewRepresentable {
               content.appendChild(dots);
             } else {
               content.innerHTML = markdown(message.content || '');
+            }
+            if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+              const attachments = document.createElement('div');
+              attachments.className = 'attachments';
+              for (const item of message.attachments) {
+                const attachment = document.createElement('div');
+                attachment.className = 'attachment';
+                attachment.textContent = `${item.name} · ${String(item.format).replaceAll('_', ' ')} · ${byteCount(item.size)}`;
+                attachments.appendChild(attachment);
+              }
+              article.appendChild(attachments);
             }
             if (message.role === 'thinking') {
               const body = document.createElement('div');

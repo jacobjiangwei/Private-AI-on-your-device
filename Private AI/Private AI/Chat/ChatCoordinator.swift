@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import LLMCore
 import Observation
+import PrivateAITools
 
 @MainActor
 @Observable
@@ -16,6 +17,9 @@ final class ChatCoordinator {
     private(set) var warmupState = "Not started"
     private(set) var warmupElapsedSeconds: Double?
     private(set) var warmupPrefixTokens: Int?
+    private(set) var pendingAttachments: [ImportedArtifact] = []
+    private(set) var isImportingAttachments = false
+    private(set) var attachmentError: String?
     var draft = ""
 
     let ollama: OllamaServiceController
@@ -23,7 +27,10 @@ final class ChatCoordinator {
     private let database: ConversationDatabase
     private let agent: ChatAgent
     private let log: RuntimeLog
+    private let artifactStore: ManagedArtifactStore
     private var generationTask: Task<Void, Never>?
+    private var activeGenerationConversationID: UUID?
+    private var attachmentImportTask: Task<Void, Never>?
     private var pendingToolMessageIDs: [UUID] = []
     private var thinkingMessageID: UUID?
 
@@ -31,6 +38,7 @@ final class ChatCoordinator {
         database = dependencies.database
         agent = dependencies.agent
         log = dependencies.runtimeLog
+        artifactStore = dependencies.artifactStore
         ollama = dependencies.ollama
         reloadConversations()
         Task {
@@ -48,6 +56,7 @@ final class ChatCoordinator {
             && !ollama.selectedModel.isEmpty
             && ollama.state.isReady
             && !isGenerating
+            && !isImportingAttachments
     }
 
     func newConversation() {
@@ -66,15 +75,76 @@ final class ChatCoordinator {
     }
 
     func deleteConversation(_ conversation: ConversationRecord) {
-        guard !isGenerating || selectedConversation?.id != conversation.id else { return }
+        guard activeGenerationConversationID != conversation.id else { return }
         do {
             try database.delete(conversation)
             if selectedConversation?.id == conversation.id {
                 selectedConversation = nil
             }
             reloadConversations()
+            Task { await reconcileArtifacts() }
         } catch {
             activity = error.localizedDescription
+        }
+    }
+
+    func chooseAttachments() {
+        guard !isGenerating, !isImportingAttachments else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.resolvesAliases = true
+        panel.allowedContentTypes = LocalDocumentFormat.supportedContentTypes
+        panel.message = "Choose up to \(ManagedArtifactStore.maximumFilesPerImport) local documents"
+        guard panel.runModal() == .OK else { return }
+        _ = importAttachments(from: panel.urls)
+    }
+
+    @discardableResult
+    func importAttachments(from urls: [URL]) -> Bool {
+        guard !urls.isEmpty, !isGenerating, !isImportingAttachments else { return false }
+        let remainingCapacity = ManagedArtifactStore.maximumFilesPerImport - pendingAttachments.count
+        guard urls.count <= remainingCapacity else {
+            attachmentError = ManagedArtifactStoreError
+                .tooManyFiles(ManagedArtifactStore.maximumFilesPerImport)
+                .localizedDescription
+            return false
+        }
+        isImportingAttachments = true
+        attachmentError = nil
+        attachmentImportTask = Task { [weak self] in
+            guard let self else { return }
+            var imported: [ImportedArtifact] = []
+            do {
+                imported = try await artifactStore.importFiles(from: urls)
+                try Task.checkCancellation()
+                var seenKeys = Set(pendingAttachments.map(\.storageKey))
+                for attachment in imported where seenKeys.insert(attachment.storageKey).inserted {
+                    pendingAttachments.append(attachment)
+                }
+                let duplicates = imported.filter { attachment in
+                    self.pendingAttachments.contains { $0.id == attachment.id } == false
+                }
+                await artifactStore.release(duplicates)
+            } catch is CancellationError {
+                await artifactStore.release(imported)
+            } catch {
+                attachmentError = error.localizedDescription
+            }
+            isImportingAttachments = false
+            attachmentImportTask = nil
+        }
+        return true
+    }
+
+    func removePendingAttachment(id: UUID) {
+        let removed = pendingAttachments.filter { $0.id == id }
+        pendingAttachments.removeAll { $0.id == id }
+        attachmentError = nil
+        Task {
+            await artifactStore.release(removed)
+            await reconcileArtifacts()
         }
     }
 
@@ -88,19 +158,21 @@ final class ChatCoordinator {
             selectedConversation = conversation
             conversation.modelName = ollama.selectedModel
             let history = modelHistory(for: conversation)
-            try database.appendMessage(
+            let turn = try database.appendUserTurn(
                 to: conversation,
-                role: .user,
-                content: prompt,
-                status: .complete
+                prompt: prompt,
+                attachments: pendingAttachments
             )
-            let assistant = try database.appendMessage(
-                to: conversation,
-                role: .assistant,
-                content: "",
-                status: .streaming
-            )
+            let sentAttachments = pendingAttachments
+            let modelPrompt = AttachmentModelContentBuilder.content(for: turn.user)
+            let assistant = turn.assistant
+            let documentPrivacyMode = conversation.messages.contains {
+                !$0.attachments.isEmpty
+            }
             draft = ""
+            pendingAttachments = []
+            Task { await artifactStore.release(sentAttachments) }
+            attachmentError = nil
             isGenerating = true
             pendingToolMessageIDs = []
             thinkingMessageID = nil
@@ -116,6 +188,7 @@ final class ChatCoordinator {
             let assistantID = assistant.id
             let conversationID = conversation.id
             let runID = UUID()
+            activeGenerationConversationID = conversationID
 
             generationTask = Task { [weak self] in
                 guard let self else { return }
@@ -127,23 +200,26 @@ final class ChatCoordinator {
                     data: [
                         "history_message_count": history.count,
                         "model": conversation.modelName,
-                        "prompt": prompt,
+                        "prompt_characters": prompt.count,
+                        "attachment_count": turn.user.attachments.count,
                         "system_prompt_version": LLMCoreSystemPrompt.version
                     ]
                 )
                 do {
                     let result = try await agent.respond(
-                        prompt: prompt,
+                        prompt: modelPrompt,
                         history: history,
                         model: conversation.modelName,
                         runID: runID,
-                        conversationID: conversationID
+                        conversationID: conversationID,
+                        documentPrivacyMode: documentPrivacyMode,
                     ) { event in
                         await self.consume(
                             event,
                             assistantID: assistantID,
                             conversationID: conversationID,
-                            runID: runID
+                            runID: runID,
+                            documentPrivacyMode: documentPrivacyMode
                         )
                     }
                     try database.update(assistant, content: result.text, status: .complete)
@@ -159,7 +235,7 @@ final class ChatCoordinator {
                         runID: runID,
                         conversationID: conversationID,
                         data: [
-                            "answer": result.text,
+                            "answer_characters": result.text.count,
                             "model_request_count": result.performance.modelRequestCount,
                             "output_token_count": result.performance.modelUsage.reduce(0) {
                                 $0 + ($1.outputTokenCount ?? 0)
@@ -215,6 +291,9 @@ final class ChatCoordinator {
                     )
                 }
                 isGenerating = false
+                if activeGenerationConversationID == conversationID {
+                    activeGenerationConversationID = nil
+                }
                 generationTask = nil
                 reloadConversations(preservingSelection: true)
             }
@@ -245,7 +324,8 @@ final class ChatCoordinator {
         _ event: AgentEvent,
         assistantID: UUID,
         conversationID: UUID,
-        runID: UUID
+        runID: UUID,
+        documentPrivacyMode: Bool
     ) async {
         guard let conversation = conversations.first(where: { $0.id == conversationID }),
               let assistant = conversation.messages.first(where: { $0.id == assistantID })
@@ -298,7 +378,7 @@ final class ChatCoordinator {
                 category: "model",
                 runID: runID,
                 conversationID: conversationID,
-                data: ["characters": delta.count, "text": delta]
+                data: ["characters": delta.count]
             )
         case .text(let delta):
             completeThinkingMessage(in: conversation)
@@ -313,7 +393,6 @@ final class ChatCoordinator {
                 conversationID: conversationID,
                 data: [
                     "characters": delta.count,
-                    "text": delta,
                     "total_characters": assistant.content.count
                 ]
             )
@@ -324,7 +403,9 @@ final class ChatCoordinator {
                 runID: runID,
                 conversationID: conversationID,
                 round: round,
-                data: ["calls": calls.map(toolCallData)]
+                data: ["calls": calls.map {
+                    toolCallData($0, documentPrivacyMode: documentPrivacyMode)
+                }]
             )
         case .toolStarted(let name, let arguments):
             completeThinkingMessage(in: conversation)
@@ -332,7 +413,11 @@ final class ChatCoordinator {
             if let toolMessage = try? database.appendMessage(
                 to: conversation,
                 role: .tool,
-                content: toolStartedContent(name: name, arguments: arguments),
+                content: ToolTranscriptContent.started(
+                    name: name,
+                    arguments: arguments,
+                    documentPrivacyMode: documentPrivacyMode
+                ),
                 status: .streaming,
                 toolName: name
             ) {
@@ -340,8 +425,13 @@ final class ChatCoordinator {
                 try? database.moveToEnd(assistant)
                 transcriptRevision += 1
             }
+            let safeArguments = ToolTranscriptContent.safeArguments(
+                name: name,
+                arguments: arguments,
+                documentPrivacyMode: documentPrivacyMode
+            )
             await log.record("tool.started", fields: [
-                "action": arguments["action"]?.stringValue ?? "",
+                "action": safeArguments["action"]?.stringValue ?? "",
                 "conversation_id": conversationID.uuidString,
                 "tool": name
             ])
@@ -351,17 +441,22 @@ final class ChatCoordinator {
                 runID: runID,
                 conversationID: conversationID,
                 data: [
-                    "arguments": jsonObject(.object(arguments)),
+                    "arguments": jsonObject(.object(safeArguments)),
                     "name": name
                 ]
             )
+        case .toolProgress(_, let detail):
+            activity = detail
         case .toolFinished(let execution):
             if let toolMessageID = pendingToolMessageIDs.first {
                 pendingToolMessageIDs.removeFirst()
                 if let toolMessage = conversation.messages.first(where: { $0.id == toolMessageID }) {
                     try? database.update(
                         toolMessage,
-                        content: toolFinishedContent(execution),
+                        content: ToolTranscriptContent.finished(
+                            execution,
+                            documentPrivacyMode: documentPrivacyMode
+                        ),
                         status: execution.succeeded ? .complete : .failed,
                         errorMessage: execution.succeeded ? nil : "Tool execution failed."
                     )
@@ -381,9 +476,13 @@ final class ChatCoordinator {
                 runID: runID,
                 conversationID: conversationID,
                 data: [
-                    "arguments": jsonObject(.object(execution.arguments)),
+                    "arguments": jsonObject(.object(ToolTranscriptContent.safeArguments(
+                        name: execution.name,
+                        arguments: execution.arguments,
+                        documentPrivacyMode: documentPrivacyMode
+                    ))),
                     "name": execution.name,
-                    "output": execution.content,
+                    "output_characters": execution.content.count,
                     "succeeded": execution.succeeded
                 ]
             )
@@ -433,9 +532,16 @@ final class ChatCoordinator {
         value.map(NSNumber.init(value:)) ?? NSNull()
     }
 
-    private func toolCallData(_ call: ToolCall) -> [String: Any] {
+    private func toolCallData(
+        _ call: ToolCall,
+        documentPrivacyMode: Bool
+    ) -> [String: Any] {
         [
-            "arguments": jsonObject(.object(call.function.arguments)),
+            "arguments": jsonObject(.object(ToolTranscriptContent.safeArguments(
+                name: call.function.name,
+                arguments: call.function.arguments,
+                documentPrivacyMode: documentPrivacyMode
+            ))),
             "name": call.function.name,
             "type": call.type
         ]
@@ -448,44 +554,6 @@ final class ChatCoordinator {
             return [:]
         }
         return object
-    }
-
-    private func toolStartedContent(
-        name: String,
-        arguments: [String: JSONValue]
-    ) -> String {
-        let input = encodedJSON(.object(arguments))
-        return """
-        **Tool:** `\(name)`
-
-        **Status:** Running
-
-        **Input**
-
-        ```json
-        \(input)
-        ```
-        """
-    }
-
-    private func toolFinishedContent(_ execution: ToolExecution) -> String {
-        """
-        **Tool:** `\(execution.name)`
-
-        **Status:** \(execution.succeeded ? "Succeeded" : "Failed")
-
-        **Input**
-
-        ```json
-        \(encodedJSON(.object(execution.arguments)))
-        ```
-
-        **Output**
-
-        ```json
-        \(execution.content)
-        ```
-        """
     }
 
     private func encodedJSON(_ value: JSONValue) -> String {
@@ -528,7 +596,10 @@ final class ChatCoordinator {
                 guard message.status == .complete else { return nil }
                 switch message.role {
                 case .user:
-                    return ChatMessage(role: .user, content: message.content)
+                    return ChatMessage(
+                        role: .user,
+                        content: AttachmentModelContentBuilder.content(for: message)
+                    )
                 case .assistant:
                     return ChatMessage(role: .assistant, content: message.content)
                 case .thinking, .tool:
@@ -548,6 +619,18 @@ final class ChatCoordinator {
             }
         } catch {
             activity = error.localizedDescription
+        }
+    }
+
+    private func reconcileArtifacts() async {
+        do {
+            let referencedPaths = try database.referencedArtifactPaths()
+            _ = try await artifactStore.reconcile(referencedRelativePaths: referencedPaths)
+            try database.removeUnreferencedArtifactBlobs()
+        } catch {
+            await log.record("artifacts.reconciliation_failed", fields: [
+                "error": String(describing: error)
+            ])
         }
     }
 }
