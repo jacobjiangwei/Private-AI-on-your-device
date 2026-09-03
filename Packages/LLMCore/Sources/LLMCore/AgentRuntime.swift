@@ -235,6 +235,7 @@ public actor AgentRuntime {
         var finalizationReminderAdded = false
         var finalizationCorrectionUsed = false
         var failedArgumentsByTool: [String: [[String: JSONValue]]] = [:]
+        var successfulExecutionsByReuseKey: [ToolReuseKey: ToolExecution] = [:]
         var messages = [ChatMessage(role: .system, content: configuration.systemPrompt)]
         messages.append(contentsOf: history.filter { $0.role != .system })
         let currentUserIndex = messages.count
@@ -408,16 +409,54 @@ public actor AgentRuntime {
             ))
             toolCallCount += proposedCalls.count
             let batches = await makeToolBatches(proposedCalls)
+            let reusableExecutions = successfulExecutionsByReuseKey
+            var reuseKeyCounts: [ToolReuseKey: Int] = [:]
+            for call in proposedCalls {
+                if let scope = await toolRuntime.successfulResultReuseKey(call) {
+                    let key = ToolReuseKey(toolName: call.function.name, scope: scope)
+                    reuseKeyCounts[key, default: 0] += 1
+                }
+            }
+            let ambiguousReuseKeys = Set(reuseKeyCounts.compactMap {
+                $0.value > 1 ? $0.key : nil
+            })
+            for key in ambiguousReuseKeys {
+                successfulExecutionsByReuseKey[key] = nil
+            }
 
             for batch in batches {
                 try Task.checkCancellation()
+                var reuseKeysByIndex: [Int: ToolReuseKey] = [:]
+                var reusedExecutionsByIndex: [Int: ToolExecution] = [:]
                 for item in batch.items {
+                    if let scope = await toolRuntime.successfulResultReuseKey(item.call) {
+                        let key = ToolReuseKey(
+                            toolName: item.call.function.name,
+                            scope: scope
+                        )
+                        reuseKeysByIndex[item.index] = key
+                                if !ambiguousReuseKeys.contains(key),
+                                    let previous = reusableExecutions[key] {
+                            reusedExecutionsByIndex[item.index] = ToolExecution(
+                                name: item.call.function.name,
+                                arguments: item.call.function.arguments,
+                                content: previous.content,
+                                succeeded: true
+                            )
+                        }
+                    }
                     await onEvent(
                         .toolStarted(
                             name: item.call.function.name,
                             arguments: item.call.function.arguments
                         )
                     )
+                    if reusedExecutionsByIndex[item.index] != nil {
+                        await onEvent(.toolProgress(
+                            name: item.call.function.name,
+                            detail: "Reusing the prior successful result from this run"
+                        ))
+                    }
                 }
 
                 let batchExecutions: [ToolExecution]
@@ -427,13 +466,16 @@ public actor AgentRuntime {
                         of: (Int, ToolExecution).self,
                         returning: [ToolExecution].self
                     ) { group in
-                        for item in batch.items {
+                        for item in batch.items
+                        where reusedExecutionsByIndex[item.index] == nil {
                             group.addTask {
                                 (item.index, await toolRuntime.execute(item.call))
                             }
                         }
 
-                        var indexedExecutions: [(Int, ToolExecution)] = []
+                        var indexedExecutions = reusedExecutionsByIndex.map {
+                            ($0.key, $0.value)
+                        }
                         for await execution in group {
                             indexedExecutions.append(execution)
                         }
@@ -442,7 +484,11 @@ public actor AgentRuntime {
                             .map(\.1)
                     }
                 } else if let item = batch.items.first {
-                    batchExecutions = [await toolRuntime.execute(item.call)]
+                    if let reused = reusedExecutionsByIndex[item.index] {
+                        batchExecutions = [reused]
+                    } else {
+                        batchExecutions = [await toolRuntime.execute(item.call)]
+                    }
                 } else {
                     batchExecutions = []
                 }
@@ -464,6 +510,10 @@ public actor AgentRuntime {
                     )
                     if execution.succeeded {
                         failedCallCounts[signature] = nil
+                                if let reuseKey = reuseKeysByIndex[item.index],
+                                    !ambiguousReuseKeys.contains(reuseKey) {
+                            successfulExecutionsByReuseKey[reuseKey] = execution
+                        }
                         if let canonical {
                             failedArgumentsByTool[item.call.function.name]?.removeAll {
                                 $0 == canonical
@@ -531,6 +581,11 @@ private struct IndexedToolCall: Sendable {
 private struct ToolBatch: Sendable {
     let concurrent: Bool
     var items: [IndexedToolCall]
+}
+
+private struct ToolReuseKey: Hashable, Sendable {
+    let toolName: String
+    let scope: String
 }
 
 private func elapsedSeconds(since start: ContinuousClock.Instant, clock: ContinuousClock) -> Double {

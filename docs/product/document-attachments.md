@@ -51,6 +51,7 @@ PDF support means searchable PDFs with a real text layer. Locked PDFs and pages 
 - Hierarchical summaries are stored under `~/.privateAI/jobs/document-summaries/<job-id>`. The job ID binds the document content hash, immutable model digest when available, extractor and prompt versions, and the complete pipeline configuration. Unit and reduction summaries are private `0600` files under `0700` directories.
 - Page, source-chunk, and reduction summaries are task-aware. Every checkpoint key uses a full SHA-256 namespace for the user's analysis goal, so a later user request cannot reuse lossy summaries produced for a different goal.
 - Within one Agent run, a structurally valid `document_analysis` retry for the same path reuses the first executed task argument. This lets a retry resume completed work even if the model paraphrases the goal after a transient failure, without treating paraphrases from separate user requests as the same cache key or crossing different document content.
+- After a successful analysis, a later model round that calls `document_analysis` for the same canonical path reuses the prior bounded Tool result instead of building a second task namespace. Independent calls proposed together in one model response remain distinct.
 - Jobs are content-addressed. Two authorized paths with identical bytes, model identity, pipeline configuration, and exact analysis goal may reuse the same validated checkpoints; path names are not part of the cache identity.
 - A cancelled or interrupted hierarchical job keeps completed checkpoints. Repeating the same document and model resumes from validated files instead of recomputing completed units.
 - Startup reconciliation removes interrupted staging files and unreferenced blobs, reports missing referenced files, and preserves imports still pending in the current session.
@@ -72,6 +73,8 @@ The model receives a compact, versioned JSON manifest containing display name, r
 The defaults cover up to 32 MiB of extracted text, 8,192 segments, and 4,096 model requests with a six-hour safety deadline. These are explicit resource limits rather than context-window limits: increasing them extends the same task graph without changing the algorithm.
 
 Each local-model request has a ten-minute deadline. Leaf and reduction responses both use JSON Schema constrained decoding; malformed, truncated, or timed-out groups enter the same finite adaptive split path instead of invalidating completed siblings.
+
+The App reports privacy-safe internal request progress while the Tool runs: leaf versus reduction phase, input count, completed checkpoint count, and Ollama output tokens per second. It does not emit document text, task text, paths, or intermediate summaries into the transcript or runtime log.
 
 Request and global deadlines are cooperative at the `ModelProvider` boundary. The production Ollama provider uses cancellable `URLSession` tasks. A future non-cooperative provider would require an isolated, terminable worker process before the same value could be described as a hard deadline.
 

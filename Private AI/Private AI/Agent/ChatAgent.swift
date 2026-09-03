@@ -164,6 +164,26 @@ actor ChatAgent {
                 name: "document_analysis",
                 detail: "Saved checkpoint \(count) at level \(level)"
             )
+        case "hierarchical.summary.request.started":
+            let count = diagnostic.data["input_count"] ?? "?"
+            let detail = diagnostic.data["phase"] == "leaf"
+                ? "Analyzing \(count) document sections"
+                : "Combining \(count) summaries"
+            return .toolProgress(name: "document_analysis", detail: detail)
+        case "hierarchical.summary.request.finished":
+            let outputTokens = Double(diagnostic.data["output_tokens"] ?? "") ?? 0
+            let outputNanoseconds = Double(
+                diagnostic.data["output_duration_nanoseconds"] ?? ""
+            ) ?? 0
+            let rate = outputNanoseconds > 0
+                ? outputTokens / (outputNanoseconds / 1_000_000_000)
+                : 0
+            return .toolProgress(
+                name: "document_analysis",
+                detail: rate > 0
+                    ? "Completed model batch · \(String(format: "%.1f", rate)) tok/s"
+                    : "Completed model batch"
+            )
         case "document.summary.finished":
             return .toolProgress(
                 name: "document_analysis",

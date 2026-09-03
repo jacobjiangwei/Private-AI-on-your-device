@@ -558,6 +558,10 @@ public actor HierarchicalContextSummarizer {
         task: String,
         timeoutSeconds: Double
     ) async throws -> [LeafSummaryResult] {
+        await ToolDiagnostics.record("hierarchical.summary.request.started", data: [
+            "input_count": String(batch.count),
+            "phase": "leaf"
+        ])
         let inputs = batch.enumerated().map { index, item in
             LeafModelInput(index: index, title: item.title, text: item.text)
         }
@@ -644,6 +648,7 @@ public actor HierarchicalContextSummarizer {
         var content = ""
         var completed = false
         var finishReason: String?
+        var completedUsage: ModelUsage?
         for try await event in stream {
             try Task.checkCancellation()
             switch event {
@@ -655,6 +660,7 @@ public actor HierarchicalContextSummarizer {
             case .completed(let usage):
                 completed = true
                 finishReason = usage.finishReason
+                completedUsage = usage
             case .thinking, .toolCalls:
                 continue
             }
@@ -664,6 +670,9 @@ public actor HierarchicalContextSummarizer {
         }
         if let finishReason, finishReason != "stop" {
             throw HierarchicalContextSummarizerError.incompleteModelSummary(finishReason)
+        }
+        if let completedUsage {
+            await recordRequestFinished(phase: "leaf", usage: completedUsage)
         }
         return content
     }
@@ -752,7 +761,8 @@ public actor HierarchicalContextSummarizer {
                                     title: work.title,
                                     text: work.text,
                                     task: task,
-                                    timeoutSeconds: timeoutSeconds
+                                    timeoutSeconds: timeoutSeconds,
+                                    inputCount: work.nodes.count
                                 )
                                 return ReductionOutcome(
                                     work: work,
@@ -942,8 +952,13 @@ public actor HierarchicalContextSummarizer {
         title: String,
         text: String,
         task: String,
-        timeoutSeconds: Double
+        timeoutSeconds: Double,
+        inputCount: Int
     ) async throws -> String {
+        await ToolDiagnostics.record("hierarchical.summary.request.started", data: [
+            "input_count": String(inputCount),
+            "phase": "reduction"
+        ])
         let request = ModelRequest(
             model: model,
             messages: [
@@ -1002,6 +1017,7 @@ public actor HierarchicalContextSummarizer {
         var summary = ""
         var completed = false
         var finishReason: String?
+        var completedUsage: ModelUsage?
         for try await event in stream {
             try Task.checkCancellation()
             switch event {
@@ -1013,6 +1029,7 @@ public actor HierarchicalContextSummarizer {
             case .completed(let usage):
                 completed = true
                 finishReason = usage.finishReason
+                completedUsage = usage
             case .thinking, .toolCalls:
                 continue
             }
@@ -1038,7 +1055,24 @@ public actor HierarchicalContextSummarizer {
         guard !trimmed.isEmpty else {
             throw HierarchicalContextSummarizerError.emptyModelSummary
         }
+        if let completedUsage {
+            await recordRequestFinished(phase: "reduction", usage: completedUsage)
+        }
         return trimmed
+    }
+
+    private static func recordRequestFinished(
+        phase: String,
+        usage: ModelUsage
+    ) async {
+        await ToolDiagnostics.record("hierarchical.summary.request.finished", data: [
+            "output_duration_nanoseconds": String(usage.outputDurationNanoseconds ?? 0),
+            "output_tokens": String(usage.outputTokenCount ?? 0),
+            "phase": phase,
+            "prompt_duration_nanoseconds": String(usage.promptDurationNanoseconds ?? 0),
+            "prompt_tokens": String(usage.promptTokenCount ?? 0),
+            "total_duration_nanoseconds": String(usage.totalDurationNanoseconds ?? 0)
+        ])
     }
 
     private func split(_ text: String, maximumBytes: Int) -> [String] {

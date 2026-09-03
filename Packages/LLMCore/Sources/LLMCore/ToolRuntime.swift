@@ -10,6 +10,7 @@ public protocol LLMTool: Sendable {
     func canonicalArgumentsForStabilization(
         _ arguments: [String: JSONValue]
     ) -> [String: JSONValue]?
+    func successfulResultReuseKey(arguments: [String: JSONValue]) -> String?
     func execute(arguments: [String: JSONValue]) async throws -> String
 }
 
@@ -28,6 +29,10 @@ public extension LLMTool {
     func canonicalArgumentsForStabilization(
         _ arguments: [String: JSONValue]
     ) -> [String: JSONValue]? {
+        nil
+    }
+
+    func successfulResultReuseKey(arguments: [String: JSONValue]) -> String? {
         nil
     }
 }
@@ -127,6 +132,12 @@ public actor ToolRuntime {
     ) -> [String: JSONValue]? {
         tools[call.function.name]?.canonicalArgumentsForStabilization(
             call.function.arguments
+        )
+    }
+
+    public func successfulResultReuseKey(_ call: ToolCall) -> String? {
+        tools[call.function.name]?.successfulResultReuseKey(
+            arguments: call.function.arguments
         )
     }
 

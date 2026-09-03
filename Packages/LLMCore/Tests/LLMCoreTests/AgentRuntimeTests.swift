@@ -481,6 +481,116 @@ struct AgentRuntimeTests {
         ])
         #expect(recordedTasks == ["Original analysis goal", "Rephrased analysis goal"])
     }
+
+    @Test("reuses a successful scoped result in a later model round")
+    func reusesSuccessfulScopedResult() async throws {
+        let first = ToolCall(function: ToolFunctionCall(
+            name: "stable_task",
+            arguments: [
+                "path": .string("document.pdf"),
+                "task": .string("Original analysis goal")
+            ]
+        ))
+        let laterRound = ToolCall(function: ToolFunctionCall(
+            name: "stable_task",
+            arguments: [
+                "path": .string("document.pdf"),
+                "task": .string("Rephrased analysis goal")
+            ]
+        ))
+        let provider = ScriptedProvider(responses: [
+            [.toolCalls([first]), .completed(ModelUsage())],
+            [.toolCalls([laterRound]), .completed(ModelUsage())],
+            [.text("done"), .completed(ModelUsage())]
+        ])
+        let tool = StableTaskTool()
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(model: "fixture", automaticallyWarmsUp: false)
+        )
+
+        let result = try await runtime.run(prompt: "Analyze the document")
+        let recordedTasks = result.messages.flatMap { message in
+            (message.toolCalls ?? []).compactMap {
+                $0.function.arguments["task"]?.stringValue
+            }
+        }
+
+        #expect(await tool.executedTasks == ["Original analysis goal"])
+        #expect(recordedTasks == ["Original analysis goal", "Rephrased analysis goal"])
+        #expect(result.performance.toolCallCount == 2)
+    }
+
+    @Test("does not cache an ambiguous scope called twice in one round")
+    func doesNotReuseAmbiguousScope() async throws {
+        let calls = ["Task A", "Task B"].map { task in
+            ToolCall(function: ToolFunctionCall(
+                name: "stable_task",
+                arguments: [
+                    "path": .string("document.pdf"),
+                    "task": .string(task)
+                ]
+            ))
+        }
+        let later = ToolCall(function: ToolFunctionCall(
+            name: "stable_task",
+            arguments: [
+                "path": .string("document.pdf"),
+                "task": .string("Task A")
+            ]
+        ))
+        let provider = ScriptedProvider(responses: [
+            [.toolCalls(calls), .completed(ModelUsage())],
+            [.toolCalls([later]), .completed(ModelUsage())],
+            [.text("done"), .completed(ModelUsage())]
+        ])
+        let tool = StableTaskTool()
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(model: "fixture", automaticallyWarmsUp: false)
+        )
+
+        _ = try await runtime.run(prompt: "Analyze the document")
+
+        #expect(await tool.executedTasks == ["Task A", "Task B", "Task A"])
+    }
+
+    @Test("does not let an ambiguous success intercept a failed task retry")
+    func ambiguousSuccessDoesNotInterceptRetry() async throws {
+        let calls = ["Task A", "Task B"].map { task in
+            ToolCall(function: ToolFunctionCall(
+                name: "stable_task",
+                arguments: [
+                    "path": .string("document.pdf"),
+                    "task": .string(task)
+                ]
+            ))
+        }
+        let retry = ToolCall(function: ToolFunctionCall(
+            name: "stable_task",
+            arguments: [
+                "path": .string("document.pdf"),
+                "task": .string("Task B paraphrased")
+            ]
+        ))
+        let provider = ScriptedProvider(responses: [
+            [.toolCalls(calls), .completed(ModelUsage())],
+            [.toolCalls([retry]), .completed(ModelUsage())],
+            [.text("done"), .completed(ModelUsage())]
+        ])
+        let tool = StableTaskTool(failingExecution: 2)
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(model: "fixture", automaticallyWarmsUp: false)
+        )
+
+        _ = try await runtime.run(prompt: "Analyze the document")
+
+        #expect(await tool.executedTasks == ["Task A", "Task B", "Task B"])
+    }
 }
 
 private struct FixtureTool: LLMTool {
@@ -560,6 +670,12 @@ private actor StableTaskTool: LLMTool {
             return nil
         }
         return ["path": .string(path), "task": .string(task)]
+    }
+
+    nonisolated func successfulResultReuseKey(
+        arguments: [String: JSONValue]
+    ) -> String? {
+        arguments["path"]?.stringValue
     }
 
     func execute(arguments: [String: JSONValue]) async throws -> String {

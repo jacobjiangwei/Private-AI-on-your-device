@@ -67,6 +67,17 @@ struct HierarchicalDocumentToolTests {
         }
         #expect(!checkpointCounts.isEmpty)
         #expect(checkpointCounts == Array(1...checkpointCounts.count))
+        let requestStarts = diagnostics.filter {
+            $0.event == "hierarchical.summary.request.started"
+        }
+        let requestFinishes = diagnostics.filter {
+            $0.event == "hierarchical.summary.request.finished"
+        }
+        #expect(requestStarts.count == 15)
+        #expect(requestFinishes.count == 15)
+        #expect(requestStarts.allSatisfy {
+            $0.data["phase"] != nil && $0.data["input_count"] != nil
+        })
         let checkpointFiles = try FileManager.default.contentsOfDirectory(
             at: jobDirectory,
             includingPropertiesForKeys: nil

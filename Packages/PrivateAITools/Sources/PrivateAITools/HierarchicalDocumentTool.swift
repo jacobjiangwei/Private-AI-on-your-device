@@ -394,6 +394,12 @@ public actor HierarchicalDocumentTool: LLMTool {
         ]
     }
 
+    public nonisolated func successfulResultReuseKey(
+        arguments: [String: JSONValue]
+    ) -> String? {
+        canonicalArgumentsForStabilization(arguments)?["path"]?.stringValue
+    }
+
     private func hexString(_ digest: SHA256.Digest) -> String {
         digest.map { String(format: "%02x", $0) }.joined()
     }
