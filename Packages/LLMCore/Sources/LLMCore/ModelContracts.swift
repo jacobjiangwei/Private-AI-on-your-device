@@ -138,6 +138,7 @@ public struct ModelRequest: Codable, Equatable, Sendable {
     public let model: String
     public let messages: [ChatMessage]
     public let tools: [ToolDefinition]
+    public let format: JSONValue?
     public let stream: Bool
     public let think: Bool
     public let keepAlive: String
@@ -147,6 +148,7 @@ public struct ModelRequest: Codable, Equatable, Sendable {
         model: String,
         messages: [ChatMessage],
         tools: [ToolDefinition] = [],
+        format: JSONValue? = nil,
         stream: Bool = true,
         think: Bool = false,
         keepAlive: String = "30m",
@@ -155,6 +157,7 @@ public struct ModelRequest: Codable, Equatable, Sendable {
         self.model = model
         self.messages = messages
         self.tools = tools
+        self.format = format
         self.stream = stream
         self.think = think
         self.keepAlive = keepAlive
@@ -165,6 +168,7 @@ public struct ModelRequest: Codable, Equatable, Sendable {
         case model
         case messages
         case tools
+        case format
         case stream
         case think
         case keepAlive = "keep_alive"
@@ -176,6 +180,7 @@ public struct ModelRequest: Codable, Equatable, Sendable {
         try container.encode(model, forKey: .model)
         try container.encode(messages, forKey: .messages)
         try container.encode(tools, forKey: .tools)
+        try container.encodeIfPresent(format, forKey: .format)
         try container.encode(stream, forKey: .stream)
         try container.encode(think, forKey: .think)
         if keepAlive == "-1" {

@@ -234,6 +234,7 @@ public actor AgentRuntime {
         var forceToolFreeFinalization = false
         var finalizationReminderAdded = false
         var finalizationCorrectionUsed = false
+        var failedArgumentsByTool: [String: [[String: JSONValue]]] = [:]
         var messages = [ChatMessage(role: .system, content: configuration.systemPrompt)]
         messages.append(contentsOf: history.filter { $0.role != .system })
         let currentUserIndex = messages.count
@@ -341,6 +342,17 @@ public actor AgentRuntime {
                 )
             }
 
+            var stabilizedCalls: [ToolCall] = []
+            for call in proposedCalls {
+                let name = call.function.name
+                let stabilized = await toolRuntime.stabilizedCall(
+                    call,
+                    previousArguments: failedArgumentsByTool[name, default: []]
+                )
+                stabilizedCalls.append(stabilized)
+            }
+            proposedCalls = stabilizedCalls
+
             if shouldFinalizeWithoutTools {
                 messages.append(ChatMessage(
                     role: .assistant,
@@ -396,9 +408,9 @@ public actor AgentRuntime {
             ))
             toolCallCount += proposedCalls.count
             let batches = await makeToolBatches(proposedCalls)
-            var executions: [ToolExecution] = []
 
             for batch in batches {
+                try Task.checkCancellation()
                 for item in batch.items {
                     await onEvent(
                         .toolStarted(
@@ -408,9 +420,10 @@ public actor AgentRuntime {
                     )
                 }
 
+                let batchExecutions: [ToolExecution]
                 if batch.concurrent {
                     let toolRuntime = self.toolRuntime
-                    let batchExecutions = await withTaskGroup(
+                    batchExecutions = await withTaskGroup(
                         of: (Int, ToolExecution).self,
                         returning: [ToolExecution].self
                     ) { group in
@@ -428,33 +441,49 @@ public actor AgentRuntime {
                             .sorted { $0.0 < $1.0 }
                             .map(\.1)
                     }
-                    executions.append(contentsOf: batchExecutions)
                 } else if let item = batch.items.first {
-                    executions.append(await toolRuntime.execute(item.call))
-                }
-            }
-
-            for (call, execution) in zip(proposedCalls, executions) {
-                await onEvent(.toolFinished(execution))
-                messages.append(
-                    ChatMessage(
-                        role: .tool,
-                        content: execution.content,
-                        toolName: execution.name
-                    )
-                )
-
-                let signature = toolCallSignature(call)
-                if execution.succeeded {
-                    failedCallCounts[signature] = nil
+                    batchExecutions = [await toolRuntime.execute(item.call)]
                 } else {
-                    let attempts = failedCallCounts[signature, default: 0] + 1
-                    failedCallCounts[signature] = attempts
-                    if attempts >= configuration.repeatedToolFailureLimit {
-                        throw AgentRuntimeError.repeatedToolFailure(
-                            name: execution.name,
-                            attempts: attempts
+                    batchExecutions = []
+                }
+                try Task.checkCancellation()
+
+                for (item, execution) in zip(batch.items, batchExecutions) {
+                    await onEvent(.toolFinished(execution))
+                    messages.append(
+                        ChatMessage(
+                            role: .tool,
+                            content: execution.content,
+                            toolName: execution.name
                         )
+                    )
+
+                    let signature = toolCallSignature(item.call)
+                    let canonical = await toolRuntime.canonicalArgumentsForStabilization(
+                        item.call
+                    )
+                    if execution.succeeded {
+                        failedCallCounts[signature] = nil
+                        if let canonical {
+                            failedArgumentsByTool[item.call.function.name]?.removeAll {
+                                $0 == canonical
+                            }
+                        }
+                    } else {
+                        if let canonical,
+                           failedArgumentsByTool[item.call.function.name, default: []]
+                            .contains(canonical) == false {
+                            failedArgumentsByTool[item.call.function.name, default: []]
+                                .append(canonical)
+                        }
+                        let attempts = failedCallCounts[signature, default: 0] + 1
+                        failedCallCounts[signature] = attempts
+                        if attempts >= configuration.repeatedToolFailureLimit {
+                            throw AgentRuntimeError.repeatedToolFailure(
+                                name: execution.name,
+                                attempts: attempts
+                            )
+                        }
                     }
                 }
             }
@@ -469,7 +498,12 @@ public actor AgentRuntime {
         for (index, call) in calls.enumerated() {
             let item = IndexedToolCall(index: index, call: call)
             let concurrencySafe = await toolRuntime.isConcurrencySafe(call)
-            if concurrencySafe, batches.last?.concurrent == true {
+            let signature = toolCallSignature(call)
+            if concurrencySafe,
+               batches.last?.concurrent == true,
+               batches.last?.items.contains(where: {
+                   toolCallSignature($0.call) == signature
+               }) == false {
                 batches[batches.count - 1].items.append(item)
             } else {
                 batches.append(
@@ -507,7 +541,11 @@ private func elapsedSeconds(since start: ContinuousClock.Instant, clock: Continu
 private func toolCallSignature(_ call: ToolCall) -> String {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
-    guard let data = try? encoder.encode(call) else {
+    let value = JSONValue.object([
+        "name": .string(call.function.name),
+        "arguments": .object(call.function.arguments)
+    ])
+    guard let data = try? encoder.encode(value) else {
         return call.function.name
     }
     return String(decoding: data, as: UTF8.self)

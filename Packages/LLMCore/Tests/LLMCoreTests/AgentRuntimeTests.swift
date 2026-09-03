@@ -294,19 +294,52 @@ struct AgentRuntimeTests {
         #expect(await tool.maximumConcurrency == 1)
     }
 
+    @Test("does not start another serial tool after cancellation")
+    func cancellationStopsSerialBatch() async throws {
+        let calls = [
+            ToolCall(function: ToolFunctionCall(
+                index: 0,
+                name: "cancellation_probe",
+                arguments: ["value": .string("first")]
+            )),
+            ToolCall(function: ToolFunctionCall(
+                index: 1,
+                name: "cancellation_probe",
+                arguments: ["value": .string("second")]
+            ))
+        ]
+        let provider = ScriptedProvider(responses: [
+            [.toolCalls(calls), .completed(ModelUsage())]
+        ])
+        let tool = CancellationProbeTool()
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(model: "fixture", automaticallyWarmsUp: false)
+        )
+
+        let run = Task { try await runtime.run(prompt: "Run both") }
+        await tool.waitUntilStarted()
+        run.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await run.value
+        }
+        #expect(await tool.executionCount == 1)
+    }
+
     @Test("stops an identical failed tool-call loop")
     func stopsRepeatedFailureLoop() async throws {
-        let call = ToolCall(
+        let calls = (0..<4).map { index in ToolCall(
             function: ToolFunctionCall(
-                index: 0,
+                index: index,
                 name: "always_fails",
                 arguments: ["value": .string("same")]
             )
-        )
-        let provider = ScriptedProvider(responses: Array(
-            repeating: [.toolCalls([call]), .completed(ModelUsage())],
-            count: 4
-        ))
+        ) }
+        let provider = ScriptedProvider(responses: calls.map {
+            [.toolCalls([$0]), .completed(ModelUsage())]
+        })
         let tool = AlwaysFailingTool()
         let runtime = AgentRuntime(
             provider: provider,
@@ -328,6 +361,125 @@ struct AgentRuntimeTests {
         }
         #expect(await tool.executionCount == 3)
         #expect(await provider.recordedRequests.count == 3)
+    }
+
+    @Test("stops identical failures within one model batch at the attempt limit")
+    func stopsRepeatedFailureBatch() async throws {
+        let calls = (0..<4).map { index in ToolCall(
+            function: ToolFunctionCall(
+                index: index,
+                name: "always_fails",
+                arguments: ["value": .string("same")]
+            )
+        ) }
+        let provider = ScriptedProvider(responses: [
+            [.toolCalls(calls), .completed(ModelUsage())]
+        ])
+        let tool = AlwaysFailingTool()
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(
+                model: "fixture",
+                repeatedToolFailureLimit: 3,
+                automaticallyWarmsUp: false
+            )
+        )
+
+        await #expect(
+            throws: AgentRuntimeError.repeatedToolFailure(
+                name: "always_fails",
+                attempts: 3
+            )
+        ) {
+            try await runtime.run(prompt: "Fail four times")
+        }
+        #expect(await tool.executionCount == 3)
+        #expect(await provider.recordedRequests.count == 1)
+    }
+
+    @Test("stabilizes a paraphrased retry against prior executed arguments")
+    func stabilizesParaphrasedRetry() async throws {
+        let first = ToolCall(function: ToolFunctionCall(
+            name: "stable_task",
+            arguments: [
+                "path": .string("document.pdf"),
+                "task": .string("Original analysis goal")
+            ]
+        ))
+        let paraphrased = ToolCall(function: ToolFunctionCall(
+            name: "stable_task",
+            arguments: [
+                "path": .string("document.pdf"),
+                "task": .string("Rephrased analysis goal")
+            ]
+        ))
+        let provider = ScriptedProvider(responses: [
+            [.toolCalls([first]), .completed(ModelUsage())],
+            [.toolCalls([paraphrased]), .completed(ModelUsage())],
+            [.text("done"), .completed(ModelUsage())]
+        ])
+        let tool = StableTaskTool(failingExecution: 1)
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(model: "fixture", automaticallyWarmsUp: false)
+        )
+
+        _ = try await runtime.run(prompt: "Analyze the document")
+        let requests = await provider.recordedRequests
+        let executedTasks = await tool.executedTasks
+        let protocolTasks = try #require(requests.last).messages.flatMap { message in
+            (message.toolCalls ?? []).compactMap { $0.function.arguments["task"]?.stringValue }
+        }
+
+        #expect(executedTasks == ["Original analysis goal", "Original analysis goal"])
+        #expect(protocolTasks == ["Original analysis goal", "Original analysis goal"])
+    }
+
+    @Test("preserves independent tasks within one accepted batch")
+    func preservesIndependentTasksWithinBatch() async throws {
+        let calls = [
+            ToolCall(function: ToolFunctionCall(
+                index: 0,
+                name: "stable_task",
+                arguments: [
+                    "path": .string("document.pdf"),
+                    "task": .string("Original analysis goal")
+                ]
+            )),
+            ToolCall(function: ToolFunctionCall(
+                index: 1,
+                name: "stable_task",
+                arguments: [
+                    "path": .string("document.pdf"),
+                    "task": .string("Rephrased analysis goal")
+                ]
+            ))
+        ]
+        let provider = ScriptedProvider(responses: [
+            [.toolCalls(calls), .completed(ModelUsage())],
+            [.text("done"), .completed(ModelUsage())]
+        ])
+        let tool = StableTaskTool()
+        let runtime = AgentRuntime(
+            provider: provider,
+            toolRuntime: try ToolRuntime(tools: [tool]),
+            configuration: AgentConfiguration(model: "fixture", automaticallyWarmsUp: false)
+        )
+
+        let result = try await runtime.run(prompt: "Analyze the document")
+        let recordedTasks = result.messages.flatMap { message in
+            (message.toolCalls ?? []).compactMap {
+                $0.function.arguments["task"]?.stringValue
+            }
+        }
+
+        #expect(await tool.executedTasks == [
+            "Original analysis goal",
+            "Rephrased analysis goal"
+        ])
+        #expect(recordedTasks == ["Original analysis goal", "Rephrased analysis goal"])
     }
 }
 
@@ -362,6 +514,60 @@ private actor RecordingDocumentTool: LLMTool {
     func execute(arguments: [String: JSONValue]) async throws -> String {
         executionCount += 1
         return "chunk \(executionCount)"
+    }
+}
+
+private actor StableTaskTool: LLMTool {
+    nonisolated let definition = ToolDefinition(
+        function: ToolFunctionDefinition(
+            name: "stable_task",
+            description: "Records a stable task for regression testing.",
+            parameters: .object(["type": .string("object")])
+        )
+    )
+    private(set) var executedTasks: [String] = []
+    private let failingExecution: Int?
+
+    init(failingExecution: Int? = nil) {
+        self.failingExecution = failingExecution
+    }
+
+    nonisolated func stabilizedArguments(
+        _ arguments: [String: JSONValue],
+        previousArguments: [[String: JSONValue]]
+    ) -> [String: JSONValue] {
+        guard let path = arguments["path"]?.stringValue,
+              let previous = previousArguments.first(where: {
+                  $0["path"]?.stringValue == path && $0["task"] != nil
+              }),
+              let task = previous["task"]
+        else {
+            return arguments
+        }
+        var result = arguments
+        result["task"] = task
+        return result
+    }
+
+    nonisolated func canonicalArgumentsForStabilization(
+        _ arguments: [String: JSONValue]
+    ) -> [String: JSONValue]? {
+        guard let path = arguments["path"]?.stringValue,
+              let task = arguments["task"]?.stringValue,
+              !path.isEmpty,
+              !task.isEmpty
+        else {
+            return nil
+        }
+        return ["path": .string(path), "task": .string(task)]
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        executedTasks.append(arguments["task"]?.stringValue ?? "")
+        if executedTasks.count == failingExecution {
+            throw FixtureToolError.failed
+        }
+        return "{}"
     }
 }
 
@@ -409,6 +615,33 @@ private actor SerialProbeTool: LLMTool {
     }
 }
 
+private actor CancellationProbeTool: LLMTool {
+    nonisolated let definition = ToolDefinition(
+        function: ToolFunctionDefinition(
+            name: "cancellation_probe",
+            description: "Waits for cancellation during regression testing.",
+            parameters: .object(["type": .string("object")])
+        )
+    )
+    private(set) var executionCount = 0
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilStarted() async {
+        if executionCount > 0 { return }
+        await withCheckedContinuation { continuation in
+            startedContinuation = continuation
+        }
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        executionCount += 1
+        startedContinuation?.resume()
+        startedContinuation = nil
+        try await ContinuousClock().sleep(for: .seconds(30))
+        return "done"
+    }
+}
+
 private enum FixtureToolError: Error {
     case failed
 }
@@ -422,6 +655,10 @@ private actor AlwaysFailingTool: LLMTool {
         )
     )
     private(set) var executionCount = 0
+
+    nonisolated func isConcurrencySafe(arguments: [String: JSONValue]) -> Bool {
+        true
+    }
 
     func execute(arguments: [String: JSONValue]) async throws -> String {
         executionCount += 1

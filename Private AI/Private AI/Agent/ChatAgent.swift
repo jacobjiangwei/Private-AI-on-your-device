@@ -159,10 +159,10 @@ actor ChatAgent {
             )
         case "document.summary.checkpoint":
             let level = diagnostic.data["level"] ?? "?"
-            let index = (Int(diagnostic.data["index"] ?? "") ?? 0) + 1
+            let count = diagnostic.data["checkpoint_count"] ?? "?"
             return .toolProgress(
                 name: "document_analysis",
-                detail: "Saved summary \(index) at level \(level)"
+                detail: "Saved checkpoint \(count) at level \(level)"
             )
         case "document.summary.finished":
             return .toolProgress(

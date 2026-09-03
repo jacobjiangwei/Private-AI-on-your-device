@@ -55,6 +55,106 @@ struct ToolRuntimeTests {
         }
     }
 
+    @Test("rejects output limits too small for a valid error payload")
+    func rejectsTinyOutputLimit() {
+        #expect(throws: ToolRuntimeError.invalidOutputLimit(31)) {
+            try ToolRuntime(tools: [], outputLimitBytes: 31)
+        }
+    }
+
+    @Test("serializes a default tool across concurrent runtime calls")
+    func serializesAcrossCalls() async throws {
+        let tool = SerialRuntimeProbeTool()
+        let runtime = try ToolRuntime(tools: [tool])
+        let first = ToolCall(function: ToolFunctionCall(
+            name: "serial_runtime_probe",
+            arguments: ["value": .string("first")]
+        ))
+        let second = ToolCall(function: ToolFunctionCall(
+            name: "serial_runtime_probe",
+            arguments: ["value": .string("second")]
+        ))
+
+        async let firstExecution = runtime.execute(first)
+        async let secondExecution = runtime.execute(second)
+        let executions = await [firstExecution, secondExecution]
+
+        #expect(executions.allSatisfy { $0.succeeded })
+        #expect(await tool.maximumConcurrency == 1)
+    }
+
+    @Test("removes a cancelled call waiting on the serial gate")
+    func cancelsSerialGateWaiter() async throws {
+        let tool = BlockingSerialRuntimeTool()
+        let runtime = try ToolRuntime(tools: [tool])
+        let firstCall = ToolCall(function: ToolFunctionCall(
+            name: "blocking_serial_runtime",
+            arguments: ["value": .string("first")]
+        ))
+        let secondCall = ToolCall(function: ToolFunctionCall(
+            name: "blocking_serial_runtime",
+            arguments: ["value": .string("second")]
+        ))
+
+        let first = Task { await runtime.execute(firstCall) }
+        await tool.waitUntilStarted()
+        let second = Task { await runtime.execute(secondCall) }
+        await Task.yield()
+        second.cancel()
+        await tool.releaseFirst()
+        let firstExecution = await first.value
+        let secondExecution = await second.value
+        let thirdCall = ToolCall(function: ToolFunctionCall(
+            name: "blocking_serial_runtime",
+            arguments: ["value": .string("third")]
+        ))
+        let thirdExecution = await withTaskGroup(
+            of: ToolExecution?.self,
+            returning: ToolExecution?.self
+        ) { group in
+            group.addTask { await runtime.execute(thirdCall) }
+            group.addTask {
+                try? await ContinuousClock().sleep(for: .milliseconds(500))
+                return nil
+            }
+            let firstResult = await group.next() ?? nil
+            group.cancelAll()
+            return firstResult
+        }
+
+        #expect(firstExecution.succeeded)
+        #expect(!secondExecution.succeeded)
+        #expect(thirdExecution?.succeeded == true)
+        #expect(await tool.executionCount == 2)
+    }
+
+    @Test("keeps thrown and unknown-tool errors as bounded valid JSON")
+    func boundsErrorJSON() async throws {
+        let limit = 128
+        let runtime = try ToolRuntime(
+            tools: [LongErrorTool()],
+            outputLimitBytes: limit
+        )
+        let thrown = await runtime.execute(ToolCall(function: ToolFunctionCall(
+            name: "long_error",
+            arguments: [:]
+        )))
+        let unknown = await runtime.execute(ToolCall(function: ToolFunctionCall(
+            name: String(repeating: "\\\"\n", count: 1_000),
+            arguments: [:]
+        )))
+
+        for execution in [thrown, unknown] {
+            #expect(!execution.succeeded)
+            #expect(execution.content.utf8.count <= limit)
+            let object = try #require(
+                JSONSerialization.jsonObject(with: Data(execution.content.utf8))
+                    as? [String: String]
+            )
+            #expect(object["error"] != nil)
+        }
+    }
+
     @Test("truncates oversized tool output on a UTF-8 boundary instead of failing")
     func truncatesOversizedOutput() async throws {
         let limit = 64
@@ -167,5 +267,82 @@ private actor OversizedTool: LLMTool {
     func execute(arguments: [String: JSONValue]) async throws -> String {
         // Multibyte characters make the truncation boundary meaningful.
         String(repeating: "苏", count: 200)
+    }
+}
+
+private actor SerialRuntimeProbeTool: LLMTool {
+    nonisolated let definition = ToolDefinition(
+        function: ToolFunctionDefinition(
+            name: "serial_runtime_probe",
+            description: "Checks serialization across ToolRuntime calls.",
+            parameters: .object(["type": .string("object")])
+        )
+    )
+    private var activeCount = 0
+    private(set) var maximumConcurrency = 0
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        activeCount += 1
+        maximumConcurrency = max(maximumConcurrency, activeCount)
+        try await ContinuousClock().sleep(for: .milliseconds(50))
+        activeCount -= 1
+        return "done"
+    }
+}
+
+private actor BlockingSerialRuntimeTool: LLMTool {
+    nonisolated let definition = ToolDefinition(
+        function: ToolFunctionDefinition(
+            name: "blocking_serial_runtime",
+            description: "Blocks the first serial runtime call.",
+            parameters: .object(["type": .string("object")])
+        )
+    )
+    private(set) var executionCount = 0
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        executionCount += 1
+        if executionCount == 1 {
+            startedWaiters.forEach { $0.resume() }
+            startedWaiters.removeAll()
+            await withCheckedContinuation { continuation in
+                releaseContinuation = continuation
+            }
+        }
+        return "done"
+    }
+
+    func waitUntilStarted() async {
+        if executionCount > 0 { return }
+        await withCheckedContinuation { continuation in
+            startedWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirst() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+private struct LongFixtureError: LocalizedError {
+    var errorDescription: String? {
+        String(repeating: "\\\"\n\t", count: 10_000)
+    }
+}
+
+private struct LongErrorTool: LLMTool {
+    let definition = ToolDefinition(
+        function: ToolFunctionDefinition(
+            name: "long_error",
+            description: "Throws an oversized escaped error.",
+            parameters: .object(["type": .string("object")])
+        )
+    )
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        throw LongFixtureError()
     }
 }

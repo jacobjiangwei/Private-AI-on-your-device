@@ -15,6 +15,7 @@ public enum HierarchicalDocumentToolError: Error, Equatable, LocalizedError, Sen
     case unreadableTextEncoding
     case invalidCheckpointKey(String)
     case checkpointOutsideJobsRoot(String)
+    case modelIdentityUnavailable(String)
 
     public var errorDescription: String? {
         switch self {
@@ -40,6 +41,8 @@ public enum HierarchicalDocumentToolError: Error, Equatable, LocalizedError, Sen
             "The summary checkpoint key '\(key)' is invalid."
         case .checkpointOutsideJobsRoot(let path):
             "The summary checkpoint path '\(path)' is outside the managed jobs root."
+        case .modelIdentityUnavailable(let model):
+            "The immutable identity for model '\(model)' is unavailable. Try again before starting document analysis."
         }
     }
 }
@@ -117,10 +120,9 @@ public actor HierarchicalDocumentTool: LLMTool {
         }
 
         let digest = try hashFile(at: documentURL)
-        let modelIdentity = await resolvedModelIdentity()
+        let modelIdentity = try await resolvedModelIdentity()
         let jobID = jobIdentifier(
             documentDigest: digest,
-            task: task,
             modelIdentity: modelIdentity
         )
         let jobDirectory = jobsRoot.appending(path: jobID, directoryHint: .isDirectory)
@@ -134,6 +136,7 @@ public actor HierarchicalDocumentTool: LLMTool {
             model: model,
             configuration: summarizerConfiguration
         )
+        let progressCounter = SummaryProgressCounter()
 
         await ToolDiagnostics.record("document.summary.started", data: [
             "job_id": jobID,
@@ -144,7 +147,9 @@ public actor HierarchicalDocumentTool: LLMTool {
             task: task,
             store: store
         ) { metadata in
+            let checkpointCount = await progressCounter.increment()
             await ToolDiagnostics.record("document.summary.checkpoint", data: [
+                "checkpoint_count": String(checkpointCount),
                 "index": String(metadata.index),
                 "job_id": jobID,
                 "level": String(metadata.level),
@@ -299,7 +304,6 @@ public actor HierarchicalDocumentTool: LLMTool {
 
     private func jobIdentifier(
         documentDigest: String,
-        task: String,
         modelIdentity: String
     ) -> String {
         let options = summarizerConfiguration.options
@@ -310,15 +314,21 @@ public actor HierarchicalDocumentTool: LLMTool {
         model=\(model)
         model_identity=\(modelIdentity)
         document=\(documentDigest)
-        task=\(task)
         material_bytes=\(summarizerConfiguration.maximumMaterialBytes)
         reduction_bytes=\(summarizerConfiguration.maximumReductionInputBytes)
+        leaf_items=\(summarizerConfiguration.maximumLeafItemsPerRequest)
+        leaf_concurrency=\(summarizerConfiguration.maximumConcurrentLeafRequests)
+        leaf_summary_characters=\(summarizerConfiguration.maximumLeafSummaryCharacters)
         items_per_group=\(summarizerConfiguration.maximumItemsPerGroup)
         summary_characters=\(summarizerConfiguration.maximumSummaryCharacters)
+        summary_output_bytes=\(summarizerConfiguration.maximumSummaryOutputBytes)
         reduction_levels=\(summarizerConfiguration.maximumReductionLevels)
         total_input_bytes=\(summarizerConfiguration.maximumTotalInputBytes)
         segment_count=\(summarizerConfiguration.maximumSegmentCount)
         model_requests=\(summarizerConfiguration.maximumModelRequests)
+        wall_clock_seconds=\(summarizerConfiguration.maximumWallClockSeconds)
+        request_seconds=\(summarizerConfiguration.maximumRequestSeconds)
+        keep_alive=\(summarizerConfiguration.keepAlive)
         context=\(options.numContext)
         temperature=\(options.temperature)
         predict=\(options.numPredict.map(String.init) ?? "nil")
@@ -326,21 +336,82 @@ public actor HierarchicalDocumentTool: LLMTool {
         return hexString(SHA256.hash(data: Data(identity.utf8)))
     }
 
-    private func resolvedModelIdentity() async -> String {
-        guard let identityProvider = provider as? any ModelIdentityProviding,
-              let identity = try? await identityProvider.immutableModelIdentity(for: model),
-              !identity.isEmpty
-        else {
+    private func resolvedModelIdentity() async throws -> String {
+        guard let identityProvider = provider as? any ModelIdentityProviding else {
             return "session:\(sessionCacheIdentity)"
         }
+        let identity = try await identityProvider.immutableModelIdentity(for: model)
+        guard !identity.isEmpty else {
+            throw HierarchicalDocumentToolError.modelIdentityUnavailable(model)
+        }
         return "immutable:\(identity)"
+    }
+
+    public nonisolated func stabilizedArguments(
+        _ arguments: [String: JSONValue],
+        previousArguments: [[String: JSONValue]]
+    ) -> [String: JSONValue] {
+        guard let canonical = canonicalArgumentsForStabilization(arguments),
+              let path = canonical["path"]?.stringValue,
+              let previous = previousArguments.first(where: {
+                $0["action"]?.stringValue == "summarize"
+                    && $0["path"]?.stringValue == path
+                    && $0["task"]?.stringValue?.isEmpty == false
+              }),
+              let stableTask = previous["task"]
+        else {
+            return arguments
+        }
+        var stabilized = arguments
+        stabilized["task"] = stableTask
+        return stabilized
+    }
+
+    public nonisolated func canonicalArgumentsForStabilization(
+        _ arguments: [String: JSONValue]
+    ) -> [String: JSONValue]? {
+        guard Set(arguments.keys) == ["action", "path", "task"],
+              arguments["action"]?.stringValue?.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ) == "summarize",
+              let rawPath = boundedTrimmedString(arguments["path"], maximumBytes: 4_096),
+              let task = boundedTrimmedString(arguments["task"], maximumBytes: 4_096)
+        else {
+            return nil
+        }
+        let expanded = (rawPath as NSString).expandingTildeInPath
+        let candidate = expanded.hasPrefix("/")
+            ? URL(fileURLWithPath: expanded)
+            : authorizedRoot.appending(path: expanded)
+        let resolved = candidate.standardizedFileURL.resolvingSymlinksInPath()
+        guard contains(resolved, root: authorizedRoot) else {
+            return nil
+        }
+        return [
+            "action": .string("summarize"),
+            "path": .string(resolved.path),
+            "task": .string(task)
+        ]
     }
 
     private func hexString(_ digest: SHA256.Digest) -> String {
         digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private func contains(_ resource: URL, root: URL) -> Bool {
+    private nonisolated func boundedTrimmedString(
+        _ value: JSONValue?,
+        maximumBytes: Int
+    ) -> String? {
+        guard let result = value?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !result.isEmpty,
+              result.utf8.count <= maximumBytes
+        else {
+            return nil
+        }
+        return result
+    }
+
+    private nonisolated func contains(_ resource: URL, root: URL) -> Bool {
         let resourceComponents = resource.pathComponents
         let rootComponents = root.pathComponents
         return resourceComponents.count >= rootComponents.count
@@ -465,4 +536,13 @@ private struct DocumentMaterialSource {
     let totalUnitCount: Int
     let skippedEmptyUnits: Int
     let coverage: String
+}
+
+private actor SummaryProgressCounter {
+    private var value = 0
+
+    func increment() -> Int {
+        value += 1
+        return value
+    }
 }

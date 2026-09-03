@@ -48,8 +48,11 @@ PDF support means searchable PDFs with a real text layer. Locked PDFs and pages 
 - Files use mode `0600`; managed directories use `0700`.
 - Duplicate content with the same format reuses one managed blob. Each message retains its own display name and order.
 - Production `local_resources` is restricted to the managed artifacts root. Relative paths are resolved beneath that root after symlink resolution.
-- Hierarchical summaries are stored under `~/.privateAI/jobs/document-summaries/<job-id>`. The job ID binds the document content hash, analysis goal, model, and pipeline version. Unit and reduction summaries are private `0600` files under `0700` directories.
-- A cancelled or interrupted hierarchical job keeps completed checkpoints. Repeating the same document, goal, model, and pipeline version resumes from those files instead of recomputing completed units.
+- Hierarchical summaries are stored under `~/.privateAI/jobs/document-summaries/<job-id>`. The job ID binds the document content hash, immutable model digest when available, extractor and prompt versions, and the complete pipeline configuration. Unit and reduction summaries are private `0600` files under `0700` directories.
+- Page, source-chunk, and reduction summaries are task-aware. Every checkpoint key uses a full SHA-256 namespace for the user's analysis goal, so a later user request cannot reuse lossy summaries produced for a different goal.
+- Within one Agent run, a structurally valid `document_analysis` retry for the same path reuses the first executed task argument. This lets a retry resume completed work even if the model paraphrases the goal after a transient failure, without treating paraphrases from separate user requests as the same cache key or crossing different document content.
+- Jobs are content-addressed. Two authorized paths with identical bytes, model identity, pipeline configuration, and exact analysis goal may reuse the same validated checkpoints; path names are not part of the cache identity.
+- A cancelled or interrupted hierarchical job keeps completed checkpoints. Repeating the same document and model resumes from validated files instead of recomputing completed units.
 - Startup reconciliation removes interrupted staging files and unreferenced blobs, reports missing referenced files, and preserves imports still pending in the current session.
 
 ## Context efficiency
@@ -58,11 +61,19 @@ The model receives a compact, versioned JSON manifest containing display name, r
 
 `document_analysis` is a reusable hierarchical context reducer rather than a PDF-specific shortcut:
 
-1. A source adapter produces bounded `ContextMaterial` units. PDFKit produces one unit per extractable page; text formats produce a document unit that is split on bounded paragraph-aware ranges when needed.
-2. The local model summarizes each unit. Each completed summary is atomically checkpointed to disk.
-3. Summaries are grouped within a fixed input budget and summarized again.
-4. Step 3 repeats until one bounded summary fits the outer Agent context.
-5. If a run is interrupted, the next identical job loads completed summaries and continues from the first missing checkpoint.
+1. A source adapter produces bounded `ContextMaterial` units. PDFKit produces one unit per extractable page; text formats produce a document unit that is split on bounded UTF-8 byte ranges with paragraph-aware boundaries when needed.
+2. Missing source units are packed in document order into structured leaf requests of at most 4 units. Segmentation and grouping use the actual JSON-encoded byte count, not a raw-text estimate. Up to 2 leaf requests run concurrently. The model must return exactly one independently validated summary per indexed source unit.
+3. At both leaf and reduction levels, a recoverable batch failure is divided from 4 inputs to 2 and then 1. A failed single-input request is retried once; the finite request budget prevents retry loops.
+4. Each completed page or chunk summary is atomically checkpointed in a checksum-validated JSON envelope as soon as its batch returns. A failing concurrent sibling does not discard the completed batch.
+5. Summaries are grouped in document order, four at a time within the encoded input budget, and summarized again. Independent groups run with concurrency 2, checkpoint as they finish, and are reconstructed in their original order. An oversized intermediate summary is split before the next request and remains part of the reduction graph instead of failing the document.
+6. Step 5 repeats until one bounded summary fits the outer Agent context. The final node must satisfy both the 9,000-character target and a 12 KiB JSON-encoded output budget, keeping the complete Tool result below the runtime's 16 KiB limit. The byte budget is the controlling safety boundary; the character target leaves enough room for faithful broad-document coverage.
+7. If a run is interrupted, the next compatible job loads completed summaries and continues from the first missing checkpoint.
+
+The defaults cover up to 32 MiB of extracted text, 8,192 segments, and 4,096 model requests with a six-hour safety deadline. These are explicit resource limits rather than context-window limits: increasing them extends the same task graph without changing the algorithm.
+
+Each local-model request has a ten-minute deadline. Leaf and reduction responses both use JSON Schema constrained decoding; malformed, truncated, or timed-out groups enter the same finite adaptive split path instead of invalidating completed siblings.
+
+Request and global deadlines are cooperative at the `ModelProvider` boundary. The production Ollama provider uses cancellable `URLSession` tasks. A future non-cooperative provider would require an isolated, terminable worker process before the same value could be described as a hard deadline.
 
 This keeps all source coverage while preventing page text and every intermediate summary from accumulating in the outer 8,192-token Tool loop. If the ordinary Agent Tool budget is nevertheless exhausted, the runtime removes Tool schemas and requests one evidence-bounded final answer instead of failing immediately with a tool-budget error.
 

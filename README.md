@@ -6,7 +6,7 @@ PrivateAI is being rebuilt as a native, on-device macOS assistant. The intended 
 
 The repository contains a development build of a native macOS chat application with Ollama model integration, persistent conversations, Markdown transcript rendering, built-in tools, and managed local document attachments. Expect breaking changes; current builds are for development only.
 
-The attachment workflow supports searchable PDFs through PDFKit plus Markdown, plain text, structured text, HTML, and common source-code formats. Whole-document work uses resumable hierarchical summarization: each page or chunk is summarized to a private local checkpoint, then summaries are recursively reduced to fit model context. See [Document Attachments](docs/product/document-attachments.md) for the verified format matrix, limits, storage model, and unsupported cases such as scanned PDFs without OCR.
+The attachment workflow supports searchable PDFs through PDFKit plus Markdown, plain text, structured text, HTML, and common source-code formats. Whole-document work uses resumable hierarchical summarization: bounded requests return independently validated summaries for several pages or chunks, each result is saved to a private local checkpoint, and summaries are recursively reduced to fit model context. See [Document Attachments](docs/product/document-attachments.md) for the verified format matrix, limits, storage model, and unsupported cases such as scanned PDFs without OCR.
 
 ## Requirements
 
