@@ -5,6 +5,7 @@ import Observation
 enum OllamaConnectionState: Equatable {
     case checking
     case ready(version: String)
+    case notInstalled
     case notRunning
     case starting
     case failed(String)
@@ -13,6 +14,7 @@ enum OllamaConnectionState: Equatable {
         switch self {
         case .checking: "Checking Ollama"
         case .ready(let version): "Ollama \(version)"
+        case .notInstalled: "Ollama is not installed"
         case .notRunning: "Ollama is not running"
         case .starting: "Starting Ollama"
         case .failed(let message): message
@@ -34,14 +36,24 @@ final class OllamaServiceController {
     private let baseURL = URL(string: "http://127.0.0.1:11434")!
     private let session: URLSession
     private let log: RuntimeLog
+    private let locateApplication: () -> URL?
 
-    init(log: RuntimeLog) {
+    init(
+        log: RuntimeLog,
+        session: URLSession? = nil,
+        locateApplication: (() -> URL?)? = nil
+    ) {
         self.log = log
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 3
-        configuration.timeoutIntervalForResource = 5
-        configuration.waitsForConnectivity = false
-        session = URLSession(configuration: configuration)
+        self.locateApplication = locateApplication ?? Self.applicationURL
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForRequest = 3
+            configuration.timeoutIntervalForResource = 5
+            configuration.waitsForConnectivity = false
+            self.session = URLSession(configuration: configuration)
+        }
     }
 
     func refresh() async {
@@ -63,9 +75,10 @@ final class OllamaServiceController {
             ])
         } catch {
             models = []
-            state = .notRunning
+            state = locateApplication() == nil ? .notInstalled : .notRunning
             await log.record("ollama.refresh.failed", fields: [
-                "error": String(describing: error)
+                "error": String(describing: error),
+                "state": state.label
             ])
         }
     }
@@ -73,14 +86,8 @@ final class OllamaServiceController {
     func openOllama() async {
         state = .starting
         let workspace = NSWorkspace.shared
-        let candidates = [
-            workspace.urlForApplication(withBundleIdentifier: "com.electron.ollama"),
-            URL(fileURLWithPath: "/Applications/Ollama.app")
-        ].compactMap { $0 }
-        guard let applicationURL = candidates.first(where: {
-            FileManager.default.fileExists(atPath: $0.path)
-        }) else {
-            state = .failed("Ollama.app was not found. Start `ollama serve`, then retry.")
+        guard let applicationURL = locateApplication() else {
+            state = .notInstalled
             return
         }
 
@@ -98,6 +105,10 @@ final class OllamaServiceController {
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    func openInstallationGuide() {
+        NSWorkspace.shared.open(URL(string: "https://ollama.com/download/mac")!)
     }
 
     private func loadVersion() async throws -> String {
@@ -118,6 +129,19 @@ final class OllamaServiceController {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
+    }
+
+    private static func applicationURL() -> URL? {
+        let workspace = NSWorkspace.shared
+        let candidates = [
+            workspace.urlForApplication(withBundleIdentifier: "com.electron.ollama"),
+            URL(fileURLWithPath: "/Applications/Ollama.app"),
+            FileManager.default.homeDirectoryForCurrentUser
+                .appending(path: "Applications/Ollama.app", directoryHint: .isDirectory)
+        ].compactMap { $0 }
+        return candidates.first(where: {
+            FileManager.default.fileExists(atPath: $0.path)
+        })
     }
 }
 

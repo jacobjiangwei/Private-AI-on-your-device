@@ -7,6 +7,11 @@ struct ChatDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if coordinator.ollama.state.requiresUserAction {
+                OllamaPreflightBanner(ollama: coordinator.ollama)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                Divider()
+            }
             header
             Divider()
             if coordinator.selectedConversation == nil {
@@ -26,6 +31,7 @@ struct ChatDetailView: View {
             ComposerView(coordinator: coordinator)
         }
         .navigationTitle(coordinator.selectedConversation?.title ?? "PrivateAI")
+        .animation(.easeInOut(duration: 0.2), value: coordinator.ollama.state)
     }
 
     private var header: some View {
@@ -58,13 +64,6 @@ struct ChatDetailView: View {
                 .popover(isPresented: $showsModelDetails, arrowEdge: .bottom) {
                     ModelTransparencyView(coordinator: coordinator)
                 }
-            } else {
-                Button("Open Ollama") {
-                    Task { await coordinator.ollama.openOllama() }
-                }
-                Button("Retry") {
-                    Task { await coordinator.ollama.refresh() }
-                }
             }
             Spacer()
             if !coordinator.activity.isEmpty {
@@ -83,6 +82,86 @@ struct ChatDetailView: View {
             get: { coordinator.ollama.selectedModel },
             set: { coordinator.selectModel($0) }
         )
+    }
+}
+
+private extension OllamaConnectionState {
+    var requiresUserAction: Bool {
+        switch self {
+        case .notInstalled, .notRunning, .failed:
+            true
+        case .checking, .ready, .starting:
+            false
+        }
+    }
+}
+
+private struct OllamaPreflightBanner: View {
+    let ollama: OllamaServiceController
+
+    var body: some View {
+        HStack(spacing: InterfaceMetrics.spacingM) {
+            Image(systemName: iconName)
+                .font(.title3)
+                .foregroundStyle(.orange)
+                .frame(width: InterfaceMetrics.controlHeight)
+
+            VStack(alignment: .leading, spacing: InterfaceMetrics.spacingXS) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: InterfaceMetrics.spacingL)
+
+            if case .notInstalled = ollama.state {
+                Button {
+                    ollama.openInstallationGuide()
+                } label: {
+                    Label("Installation Guide", systemImage: "arrow.up.right.square")
+                }
+            } else if case .notRunning = ollama.state {
+                Button {
+                    Task { await ollama.openOllama() }
+                } label: {
+                    Label("Open Ollama", systemImage: "play.fill")
+                }
+            }
+
+            Button {
+                Task { await ollama.refresh() }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+        }
+        .padding(.horizontal, InterfaceMetrics.pageHorizontalPadding)
+        .padding(.vertical, InterfaceMetrics.spacingM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08))
+        .accessibilityIdentifier("ollama.preflight.banner")
+    }
+
+    private var iconName: String {
+        if case .notInstalled = ollama.state { "square.and.arrow.down" } else { "bolt.slash" }
+    }
+
+    private var title: String {
+        if case .notInstalled = ollama.state { "Install Ollama to get started" } else { "Ollama is offline" }
+    }
+
+    private var message: String {
+        switch ollama.state {
+        case .notInstalled:
+            "Follow Ollama's official macOS installation guide, then come back and refresh."
+        case .notRunning:
+            "Open Ollama to connect to your local models. PrivateAI will refresh automatically."
+        case .failed(let message):
+            message
+        case .checking, .ready, .starting:
+            ""
+        }
     }
 }
 

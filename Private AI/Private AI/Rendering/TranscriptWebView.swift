@@ -6,6 +6,7 @@ struct TranscriptWebView: NSViewRepresentable {
     let messages: [MessageRecord]
   let revision: Int
     let onCopy: (UUID) -> Void
+    static let resourceBaseURL = TranscriptResources.baseURL
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onCopy: onCopy)
@@ -19,7 +20,7 @@ struct TranscriptWebView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
         context.coordinator.webView = webView
-        webView.loadHTMLString(Self.document, baseURL: nil)
+        webView.loadHTMLString(Self.document, baseURL: Self.resourceBaseURL)
         return webView
     }
 
@@ -91,14 +92,15 @@ struct TranscriptWebView: NSViewRepresentable {
         }
     }
 
-    private static let document = #"""
+    static let document = #"""
     <!doctype html>
     <html>
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-privateai'; script-src 'nonce-privateai'; img-src data:">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-privateai'; style-src-attr 'unsafe-inline'; script-src 'nonce-privateai'; font-src 'self'; img-src data:">
       <style nonce="privateai">
+        \#(TranscriptResources.katexCSS)
         :root { color-scheme: light dark; font-family: ui-rounded, "Avenir Next", sans-serif; }
         * { box-sizing: border-box; }
         body { margin: 0; background: transparent; color: CanvasText; }
@@ -173,6 +175,8 @@ struct TranscriptWebView: NSViewRepresentable {
     </head>
     <body><main id="messages"></main><div id="scroll-status" class="sr-only" role="status">Transcript ready</div>
       <script nonce="privateai">
+        \#(TranscriptResources.katexJavaScript)
+        \#(TranscriptResources.autoRenderJavaScript)
         const escapeHTML = value => String(value)
           .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
           .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
@@ -227,6 +231,21 @@ struct TranscriptWebView: NSViewRepresentable {
           if (inCode) { html += '<pre><code>' + escapeHTML(code.join('\n')) + '</code></pre>'; }
           flush(); return html;
         }
+        function renderMath(element) {
+          renderMathInElement(element, {
+            delimiters: [
+              { left: '$$', right: '$$', display: true },
+              { left: '\\[', right: '\\]', display: true },
+              { left: '\\(', right: '\\)', display: false },
+              { left: '$', right: '$', display: false }
+            ],
+            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+            output: 'htmlAndMathml',
+            strict: false,
+            throwOnError: false,
+            trust: false
+          });
+        }
         function byteCount(value) {
           const bytes = Number(value) || 0;
           if (bytes < 1024) return `${bytes} B`;
@@ -257,6 +276,7 @@ struct TranscriptWebView: NSViewRepresentable {
               content.appendChild(dots);
             } else {
               content.innerHTML = markdown(message.content || '');
+              renderMath(content);
             }
             if (Array.isArray(message.attachments) && message.attachments.length > 0) {
               const attachments = document.createElement('div');
@@ -308,3 +328,24 @@ struct TranscriptWebView: NSViewRepresentable {
     </html>
     """#
 }
+
+  private final class TranscriptResourceLocator: NSObject {}
+
+  private enum TranscriptResources {
+    static let baseURL = Bundle(for: TranscriptResourceLocator.self).resourceURL
+    static let katexCSS = contents(name: "katex.min", extension: "css")
+      .replacingOccurrences(of: "url(fonts/", with: "url(")
+    static let katexJavaScript = contents(name: "katex.min", extension: "js")
+    static let autoRenderJavaScript = contents(name: "auto-render.min", extension: "js")
+
+    private static func contents(name: String, extension fileExtension: String) -> String {
+      let bundle = Bundle(for: TranscriptResourceLocator.self)
+      guard let url = bundle.url(forResource: name, withExtension: fileExtension),
+          let contents = try? String(contentsOf: url, encoding: .utf8)
+      else {
+        assertionFailure("Missing transcript resource: \(name).\(fileExtension)")
+        return ""
+      }
+      return contents
+    }
+  }

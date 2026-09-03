@@ -1,7 +1,14 @@
 # Third-Party Notices
 
-The current PrivateAI application scaffold does not bundle the previously used generated browser assets, browser worker, Node.js runtime, Playwright, Chromium, or Ollama.
+PrivateAI bundles the following third-party component. PrivateAI does not bundle Ollama, a browser runtime, Node.js, Playwright, or Chromium.
 
-The target architecture proposes components such as a Markdown parser, HTML sanitizer, syntax highlighter, math renderer, model provider, and isolated browser runtime. Those proposals are not declarations that a dependency is currently included.
+## KaTeX 0.16.22
 
-When a third-party dependency or redistributable runtime is reintroduced, this file must be updated from the actual locked dependency graph and packaged artifacts. Required license texts and notices must ship with the application before distribution.
+KaTeX is bundled for offline TeX math rendering in the conversation transcript. The application includes `katex.min.js`, `auto-render.min.js`, `katex.min.css`, and the font files referenced by that stylesheet from the KaTeX 0.16.22 npm distribution.
+
+- Project: https://katex.org/
+- Source: https://github.com/KaTeX/KaTeX
+- License: MIT
+- Copyright: 2013-2020 Khan Academy and other contributors
+
+The complete MIT license text ships with the application as `LICENSE.txt` alongside the KaTeX resources and is present in the source tree at `Private AI/Private AI/Resources/KaTeX/LICENSE.txt`.

@@ -40,7 +40,7 @@ final class Private_AIUITests: XCTestCase {
         let transparencyPanel = app.descendants(matching: .any)["model.transparency.panel"]
         XCTAssertTrue(transparencyPanel.waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["System prompt"].exists)
-        XCTAssertTrue(app.staticTexts["Version 4"].exists)
+        XCTAssertTrue(app.staticTexts["Version 5"].exists)
 
         app.typeKey(.escape, modifierFlags: [])
         app.buttons["conversation.new.button"].click()
