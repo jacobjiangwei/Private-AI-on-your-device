@@ -6,19 +6,31 @@ struct ConversationSidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             brandHeader
-            List(selection: selection) {
-                ForEach(coordinator.conversations) { conversation in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(conversation.title)
-                            .lineLimit(2)
-                        Text(conversation.updatedAt, format: .relative(presentation: .named))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                List(selection: selection) {
+                    ForEach(coordinator.conversations) { conversation in
+                        VStack(alignment: .leading, spacing: InterfaceMetrics.spacingS) {
+                            Text(conversation.title)
+                                .lineLimit(2)
+                            Text(conversation.updatedAt, format: .relative(presentation: .named))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, InterfaceMetrics.spacingXS)
+                        .padding(.vertical, InterfaceMetrics.spacingS)
+                        .id(conversation.id)
+                        .tag(conversation.id)
+                        .contextMenu {
+                            Button("Delete", role: .destructive) {
+                                coordinator.deleteConversation(conversation)
+                            }
+                        }
                     }
-                    .tag(conversation.id)
-                    .contextMenu {
-                        Button("Delete", role: .destructive) {
-                            coordinator.deleteConversation(conversation)
+                }
+                .onChange(of: coordinator.selectedConversation?.id) { _, selectedID in
+                    if let selectedID {
+                        withAnimation {
+                            proxy.scrollTo(selectedID, anchor: .top)
                         }
                     }
                 }

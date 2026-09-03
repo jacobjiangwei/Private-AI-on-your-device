@@ -27,6 +27,7 @@ struct Private_AIApp: App {
         WindowGroup {
             ContentView(coordinator: coordinator)
         }
+        .defaultSize(width: 1000, height: 680)
         .modelContainer(dependencies.container)
     }
 }

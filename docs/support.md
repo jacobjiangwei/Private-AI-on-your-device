@@ -8,7 +8,7 @@ The App requires a local Ollama installation and compatible chat model. It provi
 
 ## Document analysis
 
-Attach a supported document with the paperclip button or Finder drag and drop, then ask for a summary or analysis. Long jobs save private checkpoints under `~/.privateAI/jobs/document-summaries`; stopping and repeating the same document, goal, and model resumes completed work. Scanned PDFs without an extractable text layer are not currently supported.
+Attach a supported document with the paperclip button or Finder drag and drop, or explicitly include its local path in the request, then ask for a summary or analysis. Paths copied from a shell, quoted paths, tilde-prefixed paths, and local file URLs are normalized to canonical absolute paths before a document Tool call. Long jobs save private checkpoints under `~/.privateAI/jobs/document-summaries`; stopping and repeating the same document, goal, and model resumes completed work. Scanned PDFs without an extractable text layer are not currently supported.
 
 If document analysis fails, include the error message and App version in a private report. Do not attach the document to a public issue.
 

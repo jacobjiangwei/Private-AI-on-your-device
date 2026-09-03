@@ -49,14 +49,14 @@ public actor LocalResourcesTool: LLMTool {
     public nonisolated let definition = ToolDefinition(
         function: ToolFunctionDefinition(
             name: "local_resources",
-            description: "Work with local directories and documents on this Mac. List directory contents, read a bounded range, or search within a document. Use document_analysis instead for a whole-document summary or review; do not repeatedly walk every read cursor. Supported documents include Markdown, plain text, HTML, JSON, CSV, XML, YAML, source code, and PDF.",
+            description: "Work with local directories and documents on this Mac. List directory contents, read a bounded range, or search within a document. Use read to identify or preview a document. Use document_analysis instead only for an explicit whole-document summary, review, or comprehensive analysis; do not repeatedly walk every read cursor. Supported documents include Markdown, plain text, HTML, JSON, CSV, XML, YAML, source code, and PDF.",
             parameters: objectSchema(
                 properties: [
                     "action": stringSchema(
                         description: "Operation: list returns directory entries; read returns one bounded range; search finds specific text.",
                         values: ["list", "read", "search"]
                     ),
-                    "path": stringSchema(description: "Absolute path or path relative to an authorized local root. Tilde (~) is expanded to the user's home directory."),
+                    "path": stringSchema(description: "For an attached document manifest, use its relative path exactly. For a user-entered local path, pass a canonical absolute POSIX path, for example /Users/name/Documents/File Name (1).pdf; convert shell-escaped, quoted, tilde-prefixed, or file:// input to this unescaped absolute form before calling."),
                     "query": stringSchema(description: "Text to find when action is search."),
                     "page_start": integerSchema(description: "Optional first PDF page to read or search, one-based and inclusive.", range: 1...100_000),
                     "page_end": integerSchema(description: "Optional last PDF page to read or search, one-based and inclusive.", range: 1...100_000),
@@ -166,33 +166,43 @@ public actor LocalResourcesTool: LLMTool {
 
     private func resolve(_ path: String) throws -> AuthorizedResource {
         let expanded = (path as NSString).expandingTildeInPath
-        let candidate: URL
+        let candidates: [URL]
         if expanded.hasPrefix("/") {
-            candidate = URL(fileURLWithPath: expanded)
+            candidates = [URL(fileURLWithPath: expanded)]
         } else {
             switch access {
             case .restricted(let roots):
-                candidate = (roots.first ?? fileManager.homeDirectoryForCurrentUser)
-                    .appending(path: expanded)
+                candidates = roots.map { $0.appending(path: expanded) }
             case .unrestricted:
-                candidate = fileManager.homeDirectoryForCurrentUser.appending(path: expanded)
+                candidates = [fileManager.homeDirectoryForCurrentUser.appending(path: expanded)]
             }
         }
-        let resolved = candidate.standardizedFileURL.resolvingSymlinksInPath()
-        let root: URL
-        switch access {
-        case .unrestricted:
-            root = resolved
-        case .restricted(let roots):
-            guard let matched = roots.first(where: { contains(resolved, root: $0) }) else {
-                throw LocalResourcesToolError.outsideAuthorizedRoots(path)
+        var wasAuthorized = false
+        for candidate in candidates {
+            let resolved = candidate.standardizedFileURL.resolvingSymlinksInPath()
+            let root: URL
+            switch access {
+            case .unrestricted:
+                root = resolved
+            case .restricted(let roots):
+                guard let matched = roots.first(where: { contains(resolved, root: $0) }) else {
+                    continue
+                }
+                wasAuthorized = true
+                root = matched
             }
-            root = matched
+            if fileManager.fileExists(atPath: resolved.path) {
+                return AuthorizedResource(url: resolved, root: root)
+            }
         }
-        guard fileManager.fileExists(atPath: resolved.path) else {
+        guard wasAuthorized || access.isUnrestricted else {
+            throw LocalResourcesToolError.outsideAuthorizedRoots(path)
+        }
+        if candidates.isEmpty {
+            throw LocalResourcesToolError.outsideAuthorizedRoots(path)
+        } else {
             throw LocalResourcesToolError.resourceNotFound(path)
         }
-        return AuthorizedResource(url: resolved, root: root)
     }
 
     private func contains(_ resource: URL, root: URL) -> Bool {
@@ -532,6 +542,13 @@ public actor LocalResourcesTool: LLMTool {
         return suspicious * 100 <= text.unicodeScalars.count
     }
 
+}
+
+private extension LocalResourcesAccess {
+    var isUnrestricted: Bool {
+        if case .unrestricted = self { return true }
+        return false
+    }
 }
 
 private struct AuthorizedResource {

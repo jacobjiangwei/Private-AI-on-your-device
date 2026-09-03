@@ -10,7 +10,6 @@ actor ChatAgent {
     private let documentSummariesRoot: URL
     private let log: RuntimeLog
     private var runtimes: [RuntimeKey: AgentRuntime] = [:]
-    private var documentToolRuntimes: [String: ToolRuntime] = [:]
 
     init(log: RuntimeLog, localResourcesRoot: URL, jobsRoot: URL) throws {
         provider = try OllamaProvider()
@@ -25,7 +24,6 @@ actor ChatAgent {
         )
         generalToolRuntime = try ToolRuntime(tools: [
             AppleServicesTool(),
-            localResources,
             WebTool()
         ])
         self.log = log
@@ -38,13 +36,21 @@ actor ChatAgent {
         runID: UUID,
         conversationID: UUID,
         documentPrivacyMode: Bool,
+        managedAttachmentAccess: Bool = true,
+        authorizedLocalFiles: [URL] = [],
         onEvent: @escaping AgentRuntime.EventHandler
     ) async throws -> AgentResult {
         await log.record("agent.request.started", fields: [
+            "authorized_local_files": String(authorizedLocalFiles.count),
             "history_messages": String(history.count),
             "model": model
         ])
-        let runtime = try runtime(for: model, documentPrivacyMode: documentPrivacyMode)
+        let runtime = try runtime(
+            for: model,
+            documentPrivacyMode: documentPrivacyMode,
+            managedAttachmentAccess: managedAttachmentAccess,
+            authorizedLocalFiles: authorizedLocalFiles
+        )
         do {
             let result = try await ToolDiagnostics.$handler.withValue({ diagnostic in
                 await self.log.record(
@@ -99,17 +105,31 @@ actor ChatAgent {
 
     func availableToolNames(
         documentPrivacyMode: Bool,
-        model: String = "fixture"
+        model: String = "fixture",
+        managedAttachmentAccess: Bool = true,
+        authorizedLocalFiles: [URL] = []
     ) async throws -> [String] {
-        let runtime = try toolRuntime(for: model, documentPrivacyMode: documentPrivacyMode)
+        let runtime = try toolRuntime(
+            for: model,
+            documentPrivacyMode: documentPrivacyMode,
+            managedAttachmentAccess: managedAttachmentAccess,
+            authorizedLocalFiles: authorizedLocalFiles
+        )
         return await runtime.definitions.map { $0.function.name }
     }
 
     private func runtime(
         for model: String,
-        documentPrivacyMode: Bool
+        documentPrivacyMode: Bool,
+        managedAttachmentAccess: Bool = false,
+        authorizedLocalFiles: [URL] = []
     ) throws -> AgentRuntime {
-        let key = RuntimeKey(model: model, documentPrivacyMode: documentPrivacyMode)
+        let key = RuntimeKey(
+            model: model,
+            documentPrivacyMode: documentPrivacyMode,
+            managedAttachmentAccess: managedAttachmentAccess,
+            authorizedLocalPaths: authorizedLocalFiles.map(\.path).sorted()
+        )
         if let runtime = runtimes[key] {
             return runtime
         }
@@ -117,14 +137,11 @@ actor ChatAgent {
             provider: provider,
             toolRuntime: try toolRuntime(
                 for: model,
-                documentPrivacyMode: documentPrivacyMode
+                documentPrivacyMode: documentPrivacyMode,
+                managedAttachmentAccess: managedAttachmentAccess,
+                authorizedLocalFiles: authorizedLocalFiles
             ),
-            configuration: AgentConfiguration(
-                model: model,
-                keepAlive: "-1",
-                options: ModelOptions(numContext: 8_192, temperature: 0.2, numPredict: 2_048),
-                think: true
-            )
+            configuration: configuration(for: model)
         )
         runtimes[key] = runtime
         return runtime
@@ -132,21 +149,34 @@ actor ChatAgent {
 
     private func toolRuntime(
         for model: String,
-        documentPrivacyMode: Bool
+        documentPrivacyMode: Bool,
+        managedAttachmentAccess: Bool = false,
+        authorizedLocalFiles: [URL] = []
     ) throws -> ToolRuntime {
         guard documentPrivacyMode else { return generalToolRuntime }
-        if let runtime = documentToolRuntimes[model] {
-            return runtime
-        }
+        let roots = (managedAttachmentAccess ? [localResourcesRoot] : [])
+            + authorizedLocalFiles
+        let localResources = LocalResourcesTool(
+            access: .restricted(roots),
+            maximumTextCharacters: 2_000
+        )
         let documentAnalysis = try HierarchicalDocumentTool(
             provider: provider,
             model: model,
-            authorizedRoot: localResourcesRoot,
+            authorizedRoots: roots,
             jobsRoot: documentSummariesRoot
         )
         let runtime = try ToolRuntime(tools: [localResources, documentAnalysis])
-        documentToolRuntimes[model] = runtime
         return runtime
+    }
+
+    private nonisolated func configuration(for model: String) -> AgentConfiguration {
+        AgentConfiguration(
+            model: model,
+            keepAlive: "-1",
+            options: ModelOptions(numContext: 8_192, temperature: 0.2, numPredict: 2_048),
+            think: true
+        )
     }
 
     private nonisolated func progressEvent(for diagnostic: ToolDiagnostic) -> AgentEvent? {
@@ -198,4 +228,234 @@ actor ChatAgent {
 nonisolated private struct RuntimeKey: Hashable {
     let model: String
     let documentPrivacyMode: Bool
+    let managedAttachmentAccess: Bool
+    let authorizedLocalPaths: [String]
+}
+
+nonisolated enum PromptLocalFileResolver {
+    static let maximumFiles = 8
+    static let maximumPathCharacters = 4_096
+    static let maximumPromptCharacters = 16_384
+    static let maximumPrompts = 16
+    static let maximumRepresentations = 32
+    static let maximumFileProbes = 32
+
+    static func files(
+        in prompt: String,
+        fileManager: FileManager = .default
+    ) -> [URL] {
+        files(in: [prompt], fileManager: fileManager)
+    }
+
+    static func files(
+        in prompts: [String],
+        fileManager: FileManager = .default,
+        isRegularFile: (URL) -> Bool = { url in
+            (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+        }
+    ) -> [URL] {
+        var files: [URL] = []
+        var seenPaths = Set<String>()
+        var representationCount = 0
+        var probeCount = 0
+        for prompt in prompts.prefix(maximumPrompts) {
+            let boundedPrompt = String(prompt.prefix(maximumPromptCharacters))
+            for group in representationGroups(in: boundedPrompt) {
+                guard files.count < maximumFiles else { return files }
+                guard representationCount + group.count <= maximumRepresentations
+                else {
+                    return files
+                }
+                representationCount += group.count
+                let longestRepresentation = group.map(\.value.count).max() ?? 0
+                var matches: [(url: URL, representationLength: Int)] = []
+                for representation in group {
+                    guard probeCount < maximumFileProbes else { return files }
+                    guard let candidate = candidate(
+                        for: representation.value,
+                        allowsShellEscaping: representation.allowsShellEscaping,
+                        fileManager: fileManager
+                    ), LocalDocumentFormat.supports(url: candidate) else {
+                        continue
+                    }
+                    probeCount += 1
+                    guard isRegularFile(candidate) else { continue }
+                    matches.append((
+                        candidate.standardizedFileURL.resolvingSymlinksInPath(),
+                        representation.value.count
+                    ))
+                }
+                let uniqueMatches = Dictionary(grouping: matches, by: { $0.url.path })
+                guard uniqueMatches.count == 1,
+                      let match = uniqueMatches.values.first?.first?.url,
+                      matches.contains(where: {
+                          $0.url.path == match.path
+                              && $0.representationLength == longestRepresentation
+                      })
+                else {
+                    continue
+                }
+                if seenPaths.insert(match.path).inserted {
+                    files.append(match)
+                }
+            }
+        }
+        return files
+    }
+
+    private static func representationGroups(in prompt: String) -> [[PathRepresentation]] {
+        var groups: [[PathRepresentation]] = []
+        var totalRepresentations = 0
+        for start in prompt.indices where totalRepresentations < maximumRepresentations {
+            let suffix = prompt[start...]
+            guard suffix.hasPrefix("/") || suffix.hasPrefix("~/") || suffix.hasPrefix("file://"),
+                  isBoundary(start, in: prompt)
+            else {
+                continue
+            }
+            let previous = start == prompt.startIndex ? nil : prompt[prompt.index(before: start)]
+            if let quote = previous, "\"'`".contains(quote),
+               let end = prompt[start...].firstIndex(of: quote)
+            {
+                groups.append([PathRepresentation(
+                    value: String(prompt[start..<end]),
+                    allowsShellEscaping: quote != "'"
+                )])
+                totalRepresentations += 1
+                continue
+            }
+            let limit = prompt.index(
+                start,
+                offsetBy: maximumPathCharacters,
+                limitedBy: prompt.endIndex
+            ) ?? prompt.endIndex
+            var group: [PathRepresentation] = []
+            if let tokenEnd = shellTokenEnd(in: prompt, from: start, limit: limit) {
+                group.append(PathRepresentation(
+                    value: String(prompt[start..<tokenEnd]),
+                    allowsShellEscaping: true
+                ))
+            }
+            for end in formatTerminatedEnds(in: prompt, from: start, limit: limit) {
+                group.append(PathRepresentation(
+                    value: String(prompt[start..<end]),
+                    allowsShellEscaping: true
+                ))
+            }
+            group = Array(Set(group)).sorted { $0.value.count < $1.value.count }
+            guard !group.isEmpty else { continue }
+            groups.append(group)
+            totalRepresentations += group.count
+        }
+        return groups
+    }
+
+    private static func isBoundary(_ index: String.Index, in prompt: String) -> Bool {
+        guard index != prompt.startIndex else { return true }
+        let previous = prompt[prompt.index(before: index)]
+        return previous.isWhitespace || "\"'`([{<=>%".contains(previous)
+    }
+
+    private static func candidate(
+        for representation: String,
+        allowsShellEscaping: Bool,
+        fileManager: FileManager
+    ) -> URL? {
+        let value: String
+        if allowsShellEscaping {
+            guard let unescaped = shellUnescaped(representation) else { return nil }
+            value = unescaped
+        } else {
+            value = representation
+        }
+        if value.hasPrefix("file://") {
+            guard let url = URL(string: value), url.isFileURL,
+                  url.host == nil || url.host?.isEmpty == true || url.host == "localhost"
+            else {
+                return nil
+            }
+            return url
+        }
+        let expanded = (value as NSString).expandingTildeInPath
+        guard expanded.hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: expanded)
+    }
+
+    private static func shellTokenEnd(
+        in prompt: String,
+        from start: String.Index,
+        limit: String.Index
+    ) -> String.Index? {
+        var index = start
+        var isEscaped = false
+        while index < limit {
+            let character = prompt[index]
+            if !isEscaped, character.isWhitespace { break }
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            }
+            index = prompt.index(after: index)
+        }
+        return index > start ? index : nil
+    }
+
+    private static func formatTerminatedEnds(
+        in prompt: String,
+        from start: String.Index,
+        limit: String.Index
+    ) -> [String.Index] {
+        var results: [String.Index] = []
+        var index = start
+        while index < limit {
+            let character = prompt[index]
+            guard character == "." else {
+                index = prompt.index(after: index)
+                continue
+            }
+            let extensionStart = prompt.index(after: index)
+            for fileExtension in LocalDocumentFormat.supportedFilenameExtensions {
+                guard prompt[extensionStart...].lowercased().hasPrefix(fileExtension) else {
+                    continue
+                }
+                guard let end = prompt.index(
+                    extensionStart,
+                    offsetBy: fileExtension.count,
+                    limitedBy: limit
+                ), isPathEnd(end, in: prompt) else {
+                    continue
+                }
+                results.append(end)
+            }
+            index = prompt.index(after: index)
+        }
+        return results
+    }
+
+    private static func isPathEnd(_ index: String.Index, in prompt: String) -> Bool {
+        guard index < prompt.endIndex else { return true }
+        return prompt[index].isWhitespace
+    }
+
+    private static func shellUnescaped(_ value: String) -> String? {
+        var result = ""
+        var isEscaped = false
+        for character in value {
+            if isEscaped {
+                result.append(character)
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else {
+                result.append(character)
+            }
+        }
+        return isEscaped ? nil : result
+    }
+
+    private struct PathRepresentation: Hashable {
+        let value: String
+        let allowsShellEscaping: Bool
+    }
 }

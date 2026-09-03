@@ -19,8 +19,14 @@ struct LocalResourcesToolTests {
         #expect(description.contains("HTML"))
         #expect(description.contains("source code"))
         #expect(description.contains("PDF"))
+        #expect(description.contains("Use read to identify or preview a document"))
         #expect(!description.contains("PDFKit"))
-        #expect(schema.objectValue?["properties"]?.objectValue?["path"]?.objectValue?["description"]?.stringValue?.contains("relative") == true)
+        let pathDescription = schema.objectValue?["properties"]?
+            .objectValue?["path"]?.objectValue?["description"]?.stringValue
+        #expect(pathDescription?.lowercased().contains("canonical absolute posix path") == true)
+        #expect(pathDescription?.contains("shell-escaped") == true)
+        #expect(pathDescription?.contains("file://") == true)
+        #expect(pathDescription?.contains("unescaped absolute form") == true)
         #expect(schema.objectValue?["properties"]?.objectValue?["action"]?.objectValue?["enum"] == .array([
             .string("list"),
             .string("read"),
@@ -53,6 +59,29 @@ struct LocalResourcesToolTests {
             ])
             #expect(document["kind"] == .string("text"))
             #expect(document["text"]?.stringValue == "PrivateAI local resource content")
+        }
+    }
+
+    @Test("resolves a relative path across authorized roots")
+    func relativePathAcrossRoots() async throws {
+        try await withFixtureDirectory { root in
+            let exactFile = root.appending(path: "external.txt")
+            let managedRoot = root.appending(path: "managed", directoryHint: .isDirectory)
+            let managedFile = managedRoot.appending(path: "blobs/document.txt")
+            try FileManager.default.createDirectory(
+                at: managedFile.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("external".utf8).write(to: exactFile)
+            try Data("managed".utf8).write(to: managedFile)
+            let tool = LocalResourcesTool(authorizedRoots: [exactFile, managedRoot])
+
+            let document = try await executeObject(tool, arguments: [
+                "action": .string("read"),
+                "path": .string("blobs/document.txt")
+            ])
+
+            #expect(document["text"] == .string("managed"))
         }
     }
 

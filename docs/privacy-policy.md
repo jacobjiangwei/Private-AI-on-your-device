@@ -24,6 +24,8 @@ Conversations containing document attachments run in document privacy mode. In t
 
 Users can select documents in a system file panel or drop supported Finder file URLs onto the composer. PrivateAI accesses the selected source while importing it, then uses the managed copy for later reads. The model-facing document Tool is restricted to the managed artifacts root. Searchable PDFs are read with PDFKit; scanned PDFs without a text layer are not processed with OCR.
 
+When a user explicitly includes the absolute path of an existing supported document in the current request, PrivateAI grants the local document Tools access to that exact file for the request. This does not grant access to sibling files or the containing directory. Requests with local documents expose only local document Tools, not public web or Apple service Tools.
+
 ## Security and retention
 
 The current development target has App Sandbox disabled. Managed artifact and log directories are set to owner-only permissions (`0700`), and managed files are set to `0600`. Deleting a conversation removes its attachment references; unreferenced managed blobs are reclaimed by reconciliation. Deleting the App alone does not necessarily remove data under `~/.privateAI`; developers can remove that directory to delete managed artifacts and logs.

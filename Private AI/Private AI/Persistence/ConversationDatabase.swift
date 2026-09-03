@@ -28,7 +28,8 @@ final class ConversationDatabase {
     func appendUserTurn(
         to conversation: ConversationRecord,
         prompt: String,
-        attachments: [ImportedArtifact]
+        attachments: [ImportedArtifact],
+        containsLocalDocumentReference: Bool = false
     ) throws -> (user: MessageRecord, assistant: MessageRecord) {
         do {
             let firstSequence = (conversation.messages.map(\.sequence).max() ?? 0) + 1
@@ -37,6 +38,9 @@ final class ConversationDatabase {
                 role: .user,
                 content: prompt,
                 status: .complete,
+                toolName: containsLocalDocumentReference
+                    ? DocumentConversationPolicy.localDocumentReferenceMarker
+                    : nil,
                 conversation: conversation
             )
             context.insert(user)

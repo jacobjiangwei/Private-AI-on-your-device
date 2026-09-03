@@ -3,7 +3,6 @@ import LLMCore
 
 struct ChatDetailView: View {
     @Bindable var coordinator: ChatCoordinator
-    @State private var showsLocationDemo = false
     @State private var showsModelDetails = false
 
     var body: some View {
@@ -68,19 +67,6 @@ struct ChatDetailView: View {
                 }
             }
             Spacer()
-            Button {
-                showsLocationDemo.toggle()
-            } label: {
-                Image(systemName: "location.circle")
-            }
-            .buttonStyle(.plain)
-            .frame(width: InterfaceMetrics.controlHeight, height: InterfaceMetrics.controlHeight)
-            .contentShape(Rectangle())
-            .accessibilityIdentifier("location.demo.button")
-            .help("Core Location demo")
-            .popover(isPresented: $showsLocationDemo, arrowEdge: .bottom) {
-                LocationDemoView()
-            }
             if !coordinator.activity.isEmpty {
                 Text(coordinator.activity)
                     .font(.caption)

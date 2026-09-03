@@ -152,6 +152,7 @@ struct ToolRuntimeTests {
                     as? [String: String]
             )
             #expect(object["error"] != nil)
+            #expect(execution.errorType?.isEmpty == false)
         }
     }
 

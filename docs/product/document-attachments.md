@@ -47,7 +47,7 @@ PDF support means searchable PDFs with a real text layer. Locked PDFs and pages 
 - Managed paths use `artifacts/blobs/<prefix>/<hash>/content.<extension>`. Database records store only relative paths and metadata.
 - Files use mode `0600`; managed directories use `0700`.
 - Duplicate content with the same format reuses one managed blob. Each message retains its own display name and order.
-- Production `local_resources` is restricted to the managed artifacts root. Relative paths are resolved beneath that root after symlink resolution.
+- Production `local_resources` is restricted to the managed artifacts root and to exact request-scoped files that the user explicitly references. Symlinks are resolved before the access check, and authorizing one file does not authorize its containing directory or siblings.
 - Hierarchical summaries are stored under `~/.privateAI/jobs/document-summaries/<job-id>`. The job ID binds the document content hash, immutable model digest when available, extractor and prompt versions, and the complete pipeline configuration. Unit and reduction summaries are private `0600` files under `0700` directories.
 - Page, source-chunk, and reduction summaries are task-aware. Every checkpoint key uses a full SHA-256 namespace for the user's analysis goal, so a later user request cannot reuse lossy summaries produced for a different goal.
 - Within one Agent run, a structurally valid `document_analysis` retry for the same path reuses the first executed task argument. This lets a retry resume completed work even if the model paraphrases the goal after a transient failure, without treating paraphrases from separate user requests as the same cache key or crossing different document content.
@@ -84,7 +84,7 @@ The App limits each read result to 2,000 characters. Text reads return `next_cha
 
 Document content is treated as untrusted data in the stable system prompt. File names are JSON encoded, and neither document text nor full tool output is copied into runtime logs.
 
-Any conversation containing a document attachment runs in document privacy mode: the model receives only `document_analysis` and `local_resources`, not Web or Apple service Tools. This prevents model-initiated disclosure of document content to network or side-effecting capabilities. Combining private documents with external Tools requires a future App-owned confirmation flow; system-prompt instructions alone are not treated as an authorization boundary.
+Any request containing a document attachment or an App-verified local file reference runs in document privacy mode: the model receives only `document_analysis` and `local_resources`, not Web or Apple service Tools. For user-entered paths, the App recognizes bounded path representations such as POSIX paths, shell-escaped paths, quoted paths, tilde-prefixed paths, and file URLs, verifies the real file, and grants access only to that resolved file. The Tool schema requires the model to normalize the user's representation into a canonical unescaped absolute POSIX path before calling. Neither the model nor shell evaluation creates authorization. Combining private documents with external Tools requires a future App-owned confirmation flow; system-prompt instructions alone are not treated as an authorization boundary.
 
 ## Failure states
 

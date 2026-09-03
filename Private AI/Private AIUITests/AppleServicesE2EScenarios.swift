@@ -2,31 +2,6 @@ import XCTest
 
 final class AppleServicesE2EScenarios: XCTestCase {
     @MainActor
-    func testAppLayerLocationDemo() throws {
-        let app = XCUIApplication()
-        app.launch()
-
-        let demoButton = app.buttons["location.demo.button"]
-        XCTAssertTrue(demoButton.waitForExistence(timeout: 10))
-        demoButton.click()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["location.demo.panel"]
-                .waitForExistence(timeout: 5)
-        )
-
-        app.buttons["location.demo.request"].click()
-        let received = app.staticTexts["location.demo.state"]
-        let completed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "Location received"),
-            object: received
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [completed], timeout: 35), .completed)
-        XCTAssertTrue(app.staticTexts["location.demo.latitude"].exists)
-        XCTAssertTrue(app.staticTexts["location.demo.longitude"].exists)
-        XCTAssertFalse(app.staticTexts["location.demo.error"].exists)
-    }
-
-    @MainActor
     func testAuthorizationStatusThroughOllama() throws {
         throw XCTSkip("TODO: Launch the signed App, ask Ollama which native services are authorized, and compare every reported state with the App-hosted framework results.")
     }

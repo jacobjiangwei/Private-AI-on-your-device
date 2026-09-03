@@ -6,7 +6,34 @@ PrivateAI is being rebuilt as a native, on-device macOS assistant. The intended 
 
 The repository contains a development build of a native macOS chat application with Ollama model integration, persistent conversations, Markdown transcript rendering, built-in tools, and managed local document attachments. Expect breaking changes; current builds are for development only.
 
-The attachment workflow supports searchable PDFs through PDFKit plus Markdown, plain text, structured text, HTML, and common source-code formats. Whole-document work uses resumable hierarchical summarization: bounded requests return independently validated summaries for several pages or chunks, each result is saved to a private local checkpoint, and summaries are recursively reduced to fit model context. See [Document Attachments](docs/product/document-attachments.md) for the verified format matrix, limits, storage model, and unsupported cases such as scanned PDFs without OCR.
+## Supported scenarios
+
+### Private local conversations
+
+- Discover and switch between compatible models installed in the local Ollama service.
+- Stream model thinking and answers, stop an active generation, and inspect time-to-first-token and generation speed.
+- Keep conversations in a local SwiftData store and render Markdown responses in the native macOS interface.
+
+### Work with local documents
+
+- Attach documents with the file picker or Finder drag and drop, or reference an existing local file directly in a request.
+- Understand canonical, shell-escaped, quoted, tilde-prefixed, and local `file://` path representations while granting access only to the referenced file.
+- Preview and search bounded document content, including searchable PDFs, Markdown, text, structured text, HTML, and common source-code formats.
+- Summarize or review whole documents with resumable hierarchical analysis and private local checkpoints.
+- Keep document requests isolated from public web and Apple service tools. Scanned PDFs without an extractable text layer are not currently supported because OCR is not implemented.
+
+See [Document Attachments](docs/product/document-attachments.md) for the verified format matrix, limits, storage model, and failure states.
+
+### Find current public information
+
+- Search the public web for current facts, news, weather, videos, products, places, and sources.
+- Fetch and extract bounded content from known public HTTPS pages.
+
+### Use native Mac context
+
+- Inspect device, locale, time-zone, storage, power, network, and current permission status through direct native integrations.
+- Available native actions also cover location and MapKit place search, calendar and reminder-list access, contact search, notification status, and opening a user-visible HTTPS URL.
+- Protected macOS actions remain subject to the App's real authorization state and system permission prompts. Their current App-hosted end-to-end coverage is incomplete, so availability on a particular Mac must be confirmed by a successful Tool result rather than inferred from the catalog.
 
 ## Requirements
 

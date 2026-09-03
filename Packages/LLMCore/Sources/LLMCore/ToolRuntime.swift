@@ -59,6 +59,7 @@ public struct ToolExecution: Equatable, Sendable {
     public let arguments: [String: JSONValue]
     public let content: String
     public let succeeded: Bool
+    public let errorType: String?
 
     public init(
         name: String,
@@ -66,10 +67,27 @@ public struct ToolExecution: Equatable, Sendable {
         content: String,
         succeeded: Bool
     ) {
+        self.init(
+            name: name,
+            arguments: arguments,
+            content: content,
+            succeeded: succeeded,
+            errorType: nil
+        )
+    }
+
+    public init(
+        name: String,
+        arguments: [String: JSONValue],
+        content: String,
+        succeeded: Bool,
+        errorType: String?
+    ) {
         self.name = name
         self.arguments = arguments
         self.content = content
         self.succeeded = succeeded
+        self.errorType = errorType
     }
 }
 
@@ -151,7 +169,8 @@ public actor ToolRuntime {
                     code: "unknown_tool",
                     message: ToolRuntimeError.unknownTool(name).localizedDescription
                 ),
-                succeeded: false
+                succeeded: false,
+                errorType: String(reflecting: ToolRuntimeError.self)
             )
         }
 
@@ -192,7 +211,8 @@ public actor ToolRuntime {
             name: call.function.name,
             arguments: call.function.arguments,
             content: errorContent(code: "tool_failed", message: error.localizedDescription),
-            succeeded: false
+            succeeded: false,
+            errorType: String(reflecting: type(of: error))
         )
     }
 

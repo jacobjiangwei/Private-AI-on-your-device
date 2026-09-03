@@ -1,6 +1,6 @@
 ---
 name: "macOS App Architect"
-description: "Use when: designing, implementing, reviewing, refactoring, modernizing, debugging, or running developer-level tests for macOS apps involving Swift, SwiftUI, AppKit, WebKit, native platform integration, modular architecture, performance, privacy, on-device/local/cloud AI, hybrid AI, or current Apple platform APIs. Use for engineering implementation and targeted validation; release acceptance and complete E2E testing belong to macOS Product QA."
+description: "Use when: designing, implementing, reviewing, refactoring, modernizing, debugging, or running developer-level tests for macOS apps involving Swift, SwiftUI, AppKit, WebKit, native platform integration, modular architecture, performance, privacy, on-device/local/cloud AI, hybrid AI, or current Apple platform APIs. Use for engineering implementation and targeted validation; release acceptance and complete E2E testing are outside this agent's scope."
 argument-hint: "Describe the macOS app task to design, implement, refactor, review, or test"
 tools: [read, search, edit, execute, web, todo]
 user-invocable: true

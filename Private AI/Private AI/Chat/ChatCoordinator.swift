@@ -157,18 +157,31 @@ final class ChatCoordinator {
                 ?? database.createConversation(modelName: ollama.selectedModel)
             selectedConversation = conversation
             conversation.modelName = ollama.selectedModel
+            let priorUserPrompts = conversation.messages.compactMap { message in
+                message.role == .user ? message.content : nil
+            }
+            let authorizedLocalFiles = PromptLocalFileResolver.files(
+                in: [prompt] + priorUserPrompts.reversed()
+            )
+            let hasDocumentToolHistory = DocumentConversationPolicy.hasDocumentToolHistory(
+                toolNames: conversation.messages.compactMap(\.toolName)
+            )
             let history = modelHistory(for: conversation)
             let turn = try database.appendUserTurn(
                 to: conversation,
                 prompt: prompt,
-                attachments: pendingAttachments
+                attachments: pendingAttachments,
+                containsLocalDocumentReference: !authorizedLocalFiles.isEmpty
             )
             let sentAttachments = pendingAttachments
             let modelPrompt = AttachmentModelContentBuilder.content(for: turn.user)
             let assistant = turn.assistant
-            let documentPrivacyMode = conversation.messages.contains {
+            let hasManagedAttachments = conversation.messages.contains {
                 !$0.attachments.isEmpty
             }
+            let documentPrivacyMode = hasManagedAttachments
+                || hasDocumentToolHistory
+                || !authorizedLocalFiles.isEmpty
             draft = ""
             pendingAttachments = []
             Task { await artifactStore.release(sentAttachments) }
@@ -202,6 +215,7 @@ final class ChatCoordinator {
                         "model": conversation.modelName,
                         "prompt_characters": prompt.count,
                         "attachment_count": turn.user.attachments.count,
+                        "authorized_local_file_count": authorizedLocalFiles.count,
                         "system_prompt_version": LLMCoreSystemPrompt.version
                     ]
                 )
@@ -213,6 +227,8 @@ final class ChatCoordinator {
                         runID: runID,
                         conversationID: conversationID,
                         documentPrivacyMode: documentPrivacyMode,
+                        managedAttachmentAccess: hasManagedAttachments,
+                        authorizedLocalFiles: authorizedLocalFiles,
                     ) { event in
                         await self.consume(
                             event,
@@ -481,6 +497,7 @@ final class ChatCoordinator {
                         arguments: execution.arguments,
                         documentPrivacyMode: documentPrivacyMode
                     ))),
+                    "error_type": execution.errorType ?? "",
                     "name": execution.name,
                     "output_characters": execution.content.count,
                     "succeeded": execution.succeeded
@@ -632,5 +649,15 @@ final class ChatCoordinator {
                 "error": String(describing: error)
             ])
         }
+    }
+}
+
+nonisolated enum DocumentConversationPolicy {
+    static let localDocumentReferenceMarker = "privateai.local_document_reference"
+
+    static func hasDocumentToolHistory(toolNames: [String]) -> Bool {
+        !Set(toolNames).isDisjoint(with: [
+            "document_analysis", "local_resources", localDocumentReferenceMarker
+        ])
     }
 }

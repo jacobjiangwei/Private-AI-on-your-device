@@ -130,6 +130,24 @@ struct ConversationDatabaseTests {
         #expect(!modelContent.contains(FileManager.default.homeDirectoryForCurrentUser.path))
     }
 
+    @Test("persists local document privacy provenance on the user turn")
+    func localDocumentReference() throws {
+        let database = try makeDatabase()
+        let conversation = try database.createConversation(modelName: "fixture")
+
+        let turn = try database.appendUserTurn(
+            to: conversation,
+            prompt: "/tmp/document.txt summarize",
+            attachments: [],
+            containsLocalDocumentReference: true
+        )
+
+        #expect(turn.user.toolName == DocumentConversationPolicy.localDocumentReferenceMarker)
+        #expect(DocumentConversationPolicy.hasDocumentToolHistory(
+            toolNames: conversation.messages.compactMap(\.toolName)
+        ))
+    }
+
     @Test("local document tool transcript omits document paths, queries, and content")
     func privateDocumentToolTranscript() {
         let sentinel = "PRIVATE-DOCUMENT-SENTINEL"

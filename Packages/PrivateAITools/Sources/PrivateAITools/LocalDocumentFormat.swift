@@ -62,6 +62,10 @@ public enum LocalDocumentFormat: String, CaseIterable, Sendable {
         }
     }
 
+    public static var supportedFilenameExtensions: [String] {
+        extensions.keys.sorted()
+    }
+
     private static let extensions: [String: LocalDocumentFormat] = [
         "pdf": .pdf,
         "md": .markdown,

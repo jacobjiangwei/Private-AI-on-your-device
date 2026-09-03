@@ -7,6 +7,28 @@ import Testing
 
 @Suite("Hierarchical Document Tool", .serialized)
 struct HierarchicalDocumentToolTests {
+    @Test("requires canonical paths in the model-facing schema")
+    func canonicalPathSchema() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tool = try HierarchicalDocumentTool(
+            provider: DocumentFactProvider(),
+            model: "fixture",
+            authorizedRoot: root,
+            jobsRoot: root.appending(path: "jobs", directoryHint: .isDirectory)
+        )
+        let pathDescription = tool.definition.function.parameters.objectValue?["properties"]?
+            .objectValue?["path"]?.objectValue?["description"]?.stringValue
+
+        #expect(tool.definition.function.description.contains("only when the user explicitly requests"))
+        #expect(tool.definition.function.description.contains("quick preview"))
+        #expect(pathDescription?.lowercased().contains("canonical absolute posix path") == true)
+        #expect(pathDescription?.contains("shell-escaped") == true)
+        #expect(pathDescription?.contains("file://") == true)
+        #expect(pathDescription?.contains("unescaped absolute form") == true)
+    }
+
     @Test("summarizes every PDF page, reduces recursively, and resumes from files")
     func summarizePDFAndResume() async throws {
         let root = FileManager.default.temporaryDirectory
@@ -425,6 +447,7 @@ struct HierarchicalDocumentToolTests {
         }
         #expect(try String(contentsOf: externalFile, encoding: .utf8) == "outside")
     }
+
 }
 
 private actor DocumentFactProvider: ModelProvider, ModelIdentityProviding {
